@@ -615,9 +615,6 @@ private fun LyricPlayer(
                             Text(
                                 text = buildString {
                                     append("%06d".format(song.code))
-                                    if (song.code != 0 && song.displaySinger().isNotBlank() && song.displaySinger() != "Unknown") {
-                                        append(" • ").append(song.displaySinger())
-                                    }
                                     if (reservationQueue.isNotEmpty()) {
                                         append(" • R: ").append(reservationQueue.size)
                                     }
@@ -628,15 +625,6 @@ private fun LyricPlayer(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                        }
-                        if (isPipSupported) {
-                            IconButton(onClick = onEnterPip) {
-                                Icon(
-                                    imageVector = Icons.Filled.PictureInPictureAlt,
-                                    contentDescription = "Picture in Picture",
-                                    tint = Color.White
-                                )
-                            }
                         }
                     }
                 }
@@ -794,9 +782,6 @@ private fun LyricPlayer(
                             Text(
                                 text = buildString {
                                     append("%06d".format(song.code))
-                                    if (song.code != 0 && song.displaySinger().isNotBlank() && song.displaySinger() != "Unknown") {
-                                        append(" • ").append(song.displaySinger())
-                                    }
                                     if (reservationQueue.isNotEmpty()) {
                                         append(" • R: ").append(reservationQueue.size)
                                     }
@@ -807,14 +792,6 @@ private fun LyricPlayer(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
-                        }
-                        if (isPipSupported) {
-                            IconButton(onClick = onEnterPip) {
-                                Icon(
-                                    imageVector = Icons.Filled.PictureInPictureAlt,
-                                    contentDescription = "Picture in Picture"
-                                )
-                            }
                         }
                     }
                 }
