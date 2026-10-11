@@ -113,6 +113,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.songhub.android.audio.BassMidiEngine
 import com.songhub.android.audio.SoundFontManager
+import com.songhub.android.model.CountdownGroup
 import com.songhub.android.model.LyricLine
 import com.songhub.android.parser.TempoUtils
 import com.songhub.android.song.ScoreCalculator
@@ -169,6 +170,7 @@ fun PlayerScreen(
         song = activeSong,
         library = library,
         lines = parsed.lines,
+        countdowns = parsed.countdowns,
         tempoMap = parsed.tempoMap,
         ticksPerBeat = parsed.ticksPerBeat,
         totalMs = parsed.totalMs,
@@ -230,6 +232,7 @@ private fun LyricPlayer(
     song: SongItem,
     library: LibraryRepository.Library,
     lines: List<LyricLine>,
+    countdowns: List<CountdownGroup>,
     tempoMap: List<TempoUtils.TempoEntry>,
     ticksPerBeat: Int,
     totalMs: Double,
@@ -634,73 +637,18 @@ private fun LyricPlayer(
                         .padding(horizontal = 32.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (codeInput.isNotBlank()) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = codeInput.padStart(6, '0'),
-                                style = MaterialTheme.typography.displayLarge.copy(fontSize = 56.sp),
-                                fontWeight = FontWeight.Black,
-                                color = Color(0xFFFBBF24)
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            if (typedSongPreview != null) {
-                                Text(
-                                    text = typedSongPreview.displayTitle(),
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Text(
-                                    text = typedSongPreview.displaySinger(),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xFF2DD4BF),
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            } else {
-                                Text(
-                                    text = "Searching song code...",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Color.White.copy(alpha = 0.6f)
-                                )
-                            }
-                        }
-                    } else if (song.code == 0) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "Select a song",
-                                style = MaterialTheme.typography.displayMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "000000",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = Color.White.copy(alpha = 0.8f)
-                            )
-                        }
-                    } else if (lines.isEmpty()) {
-                        Text("No lyrics", style = MaterialTheme.typography.titleLarge, color = Color.White)
-                    } else if (lyricStyle == LyricSettings.STYLE_KARAOKE) {
-                        KaraokeStack(
-                            lines = lines,
-                            lineIndex = lineIndex,
-                            posMs = posMs,
-                            currentTick = posTick,
-                            fillColor = KaraokeHighlight,
-                            fontSizeSp = LyricSettings.getFontSizeLandscape(context)
-                        )
-                    } else {
-                        LyricStack(lines = lines, lineIndex = lineIndex)
-                    }
+                    PlayerCenterContent(
+                        song = song,
+                        codeInput = codeInput,
+                        typedSongPreview = typedSongPreview,
+                        lines = lines,
+                        countdowns = countdowns,
+                        posMs = posMs,
+                        currentTick = posTick,
+                        lineIndex = lineIndex,
+                        lyricStyle = lyricStyle,
+                        context = context
+                    )
                 }
 
                 Spacer(Modifier.height(8.dp))
@@ -807,76 +755,30 @@ private fun LyricPlayer(
                     }
                 }
 
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(8.dp))
 
-                if (codeInput.isNotBlank()) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = codeInput.padStart(6, '0'),
-                            style = MaterialTheme.typography.displayLarge.copy(fontSize = 56.sp),
-                            fontWeight = FontWeight.Black,
-                            color = Color(0xFFFBBF24)
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        if (typedSongPreview != null) {
-                            Text(
-                                text = typedSongPreview.displayTitle(),
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                textAlign = TextAlign.Center,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                text = typedSongPreview.displaySinger(),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFF2DD4BF),
-                                textAlign = TextAlign.Center,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        } else {
-                            Text(
-                                text = "Searching song code...",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Color.White.copy(alpha = 0.6f)
-                            )
-                        }
-                    }
-                } else if (song.code == 0) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "Select a song",
-                            style = MaterialTheme.typography.displayMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = "000000",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else if (lines.isEmpty()) {
-                    Text("No lyrics", style = MaterialTheme.typography.titleLarge)
-                } else if (lyricStyle == LyricSettings.STYLE_KARAOKE) {
-                    KaraokeStack(
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    PlayerCenterContent(
+                        song = song,
+                        codeInput = codeInput,
+                        typedSongPreview = typedSongPreview,
                         lines = lines,
-                        lineIndex = lineIndex,
+                        countdowns = countdowns,
                         posMs = posMs,
                         currentTick = posTick,
-                        fillColor = KaraokeHighlight,
-                        fontSizeSp = LyricSettings.getFontSizePortrait(context)
+                        lineIndex = lineIndex,
+                        lyricStyle = lyricStyle,
+                        context = context
                     )
-                } else {
-                    LyricStack(lines = lines, lineIndex = lineIndex)
                 }
 
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(8.dp))
 
                 AnimatedVisibility(
                     visible = controlsVisible,
@@ -1976,6 +1878,180 @@ private fun BackgroundVideoPlayer(
         },
         modifier = modifier
     )
+}
+
+@Composable
+private fun PlayerCenterContent(
+    song: SongItem,
+    codeInput: String,
+    typedSongPreview: SongItem?,
+    lines: List<LyricLine>,
+    countdowns: List<CountdownGroup>,
+    posMs: Double,
+    currentTick: Long,
+    lineIndex: Int,
+    lyricStyle: Int,
+    context: Context
+) {
+    val firstLineStart = lines.firstOrNull()?.startMs ?: 6000.0
+    val showSongIntroCard = song.code != 0 && posMs < minOf(5000.0, firstLineStart - 300.0)
+
+    val activeCountdown = remember(countdowns, posMs) {
+        countdowns.find { cd ->
+            val firstMs = if (cd.pipMs.isNotEmpty()) cd.pipMs[0] else cd.anchorMs - 2000.0
+            posMs >= firstMs - 50.0 && posMs < cd.anchorMs
+        }
+    }
+
+    if (codeInput.isNotBlank()) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = codeInput.padStart(6, '0'),
+                style = MaterialTheme.typography.displayLarge.copy(fontSize = 56.sp),
+                fontWeight = FontWeight.Black,
+                color = Color(0xFFFBBF24)
+            )
+            Spacer(Modifier.height(8.dp))
+            if (typedSongPreview != null) {
+                Text(
+                    text = typedSongPreview.displayTitle(),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = typedSongPreview.displaySinger(),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = Color(0xFF2DD4BF),
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            } else {
+                Text(
+                    text = "Searching song code...",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White.copy(alpha = 0.6f)
+                )
+            }
+        }
+    } else if (song.code == 0) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "Select a song",
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "000000",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Medium,
+                color = Color.White.copy(alpha = 0.8f)
+            )
+        }
+    } else if (showSongIntroCard) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = song.displayTitle(),
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Black,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = song.displaySinger(),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF2DD4BF),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (song.style.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = song.style,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+            }
+        }
+    } else {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (activeCountdown != null && activeCountdown.pipMs.isNotEmpty()) {
+                val pipMsList = activeCountdown.pipMs
+                val beatsHit = pipMsList.count { pipTime -> posMs >= pipTime }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 20.dp)
+                ) {
+                    for (dotIndex in 0 until 4) {
+                        val isLit = dotIndex < beatsHit
+                        val dotColor by animateColorAsState(
+                            targetValue = if (isLit) Color(0xFF2DD4BF) else Color.White.copy(alpha = 0.25f),
+                            label = "dotColor"
+                        )
+                        val dotScale by animateFloatAsState(
+                            targetValue = if (isLit) 1.25f else 1.0f,
+                            label = "dotScale"
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .scale(dotScale)
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(dotColor)
+                                .then(
+                                    if (isLit) Modifier.border(
+                                        2.dp,
+                                        Color.White,
+                                        RoundedCornerShape(50)
+                                    ) else Modifier
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${4 - dotIndex}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black,
+                                color = if (isLit) Color(0xFF003731) else Color.White.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (lines.isEmpty()) {
+                Text("No lyrics", style = MaterialTheme.typography.titleLarge, color = Color.White)
+            } else if (lyricStyle == LyricSettings.STYLE_KARAOKE) {
+                KaraokeStack(
+                    lines = lines,
+                    lineIndex = lineIndex,
+                    posMs = posMs,
+                    currentTick = currentTick,
+                    fillColor = KaraokeHighlight,
+                    fontSizeSp = LyricSettings.getFontSizeLandscape(context)
+                )
+            } else {
+                LyricStack(lines = lines, lineIndex = lineIndex)
+            }
+        }
+    }
 }
 
 private fun fmtMs(ms: Double): String {

@@ -1,8 +1,10 @@
 package com.outofthebox.songhubatv.data
 
 import com.songhub.android.database.NativeLib
+import com.songhub.android.model.CountdownGroup
 import com.songhub.android.model.Fragment
 import com.songhub.android.model.LyricLine
+import com.songhub.android.parser.CountdownGrouper
 import com.songhub.android.parser.LineBuilder
 import com.songhub.android.parser.MidiParser
 import com.songhub.android.parser.TempoUtils
@@ -26,6 +28,7 @@ object LyricLoader {
 
     data class Parsed(
         val lines: List<LyricLine>,
+        val countdowns: List<CountdownGroup> = emptyList(),
         val tempoMap: List<TempoUtils.TempoEntry> = emptyList(),
         val ticksPerBeat: Int = 0,
         val totalMs: Double = 0.0,
@@ -61,9 +64,15 @@ object LyricLoader {
                     }
                 }
             }
+            val countdowns = try {
+                CountdownGrouper.build(result.countdownEventsTicks, lines, tempoMap, ppqn)
+            } catch (t: Throwable) {
+                emptyList()
+            }
             val totalMs = lines.maxOfOrNull { it.endMs } ?: 0.0
             Parsed(
                 lines = lines,
+                countdowns = countdowns,
                 tempoMap = tempoMap,
                 ticksPerBeat = ppqn,
                 totalMs = totalMs
