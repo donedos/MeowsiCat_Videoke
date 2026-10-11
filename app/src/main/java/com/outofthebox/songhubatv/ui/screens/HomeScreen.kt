@@ -18,13 +18,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,7 +30,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -51,10 +48,10 @@ data class CategoryCardData(
 fun HomeScreen(
     library: LibraryRepository.Library,
     onOpenSongs: () -> Unit,
-    onOpenArtists: () -> Unit,
-    onOpenNewSongs: () -> Unit,
+    onOpenArtists: () -> Unit = {},
+    onOpenNewSongs: () -> Unit = {},
     onOpenSettings: () -> Unit,
-    onOpenRankings: () -> Unit,
+    onOpenRankings: () -> Unit = {},
     onOpenSong: (SongItem) -> Unit = {}
 ) {
     Column(
@@ -82,12 +79,12 @@ fun HomeScreen(
             Spacer(Modifier.width(20.dp))
             Column {
                 Text(
-                    text = "SongHub",
+                    text = "MeowsiCat",
                     style = MaterialTheme.typography.displayMedium,
                     fontWeight = FontWeight.Black
                 )
                 Text(
-                    text = "Karaoke for every song",
+                    text = "Karaoke for everyone",
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -120,28 +117,12 @@ fun HomeScreen(
         Spacer(Modifier.height(28.dp))
         CategoryRow(
             items = listOf(
-                CategoryCardData("Songs", "Browse full catalog", Icons.Filled.LibraryMusic, onOpenSongs),
-                CategoryCardData("New Songs", "Latest additions", Icons.Filled.Star, onOpenNewSongs),
-                CategoryCardData("Artists", "Browse by singer", Icons.Filled.Person, onOpenArtists),
-                CategoryCardData("Rankings", "Top scores", Icons.Filled.EmojiEvents, onOpenRankings),
+                CategoryCardData("Karaoke Player", "Select & play songs", Icons.Filled.PlayCircle, onOpenSongs),
+                CategoryCardData("Song Search", "Find by title or singer", Icons.Filled.Search, onOpenSongs),
+                CategoryCardData("Remote", "Mobile remote control", Icons.Filled.SettingsRemote, { }),
                 CategoryCardData("Settings", "Content & display", Icons.Filled.Settings, onOpenSettings)
             )
         )
-
-        Spacer(Modifier.height(32.dp))
-        HorizontalDivider(color = Color(0x22FFFFFF))
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = "Now trending",
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(Modifier.height(12.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(library.songs.take(30)) { song ->
-                TrendingCard(song.title, song.singer, onClick = { onOpenSong(song) })
-            }
-        }
     }
 }
 
@@ -175,37 +156,6 @@ private fun CategoryRow(items: List<CategoryCardData>) {
                     )
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun TrendingCard(title: String, singer: String, onClick: () -> Unit) {
-    FocusableCard(
-        onClick = onClick,
-        modifier = Modifier
-            .size(width = 260.dp, height = 160.dp)
-            .padding(10.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Icon(
-                Icons.Filled.Mic,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2
-            )
-            Text(
-                text = singer,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1
-            )
         }
     }
 }
