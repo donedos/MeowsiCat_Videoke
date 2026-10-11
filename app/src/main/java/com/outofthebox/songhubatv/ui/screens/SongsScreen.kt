@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -39,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
@@ -50,7 +50,8 @@ import com.outofthebox.songhubatv.ui.components.FocusableCard
 import com.outofthebox.songhubatv.ui.components.MicBadge
 import com.outofthebox.songhubatv.ui.components.TopBar
 
-enum class SortMode { CODE, TITLE, ARTIST }
+enum class SongTab { ALL, NEW }
+enum class SortMode { TITLE, CODE, ARTIST }
 
 @Composable
 fun SongsScreen(
@@ -60,37 +61,57 @@ fun SongsScreen(
     artistFilter: String? = null
 ) {
     var query by remember { mutableStateOf("") }
-    var sortMode by remember { mutableStateOf(SortMode.CODE) }
+    var selectedTab by remember { mutableStateOf(SongTab.ALL) }
+    var sortMode by remember { mutableStateOf(SortMode.TITLE) }
     val isWide = LocalConfiguration.current.screenWidthDp >= 720
 
-    val filtered = remember(library.songs, query, sortMode, artistFilter) {
-        library.songs.filter { song ->
+    val filtered = remember(library.songs, query, sortMode, artistFilter, selectedTab) {
+        val baseList = when (selectedTab) {
+            SongTab.ALL -> library.songs
+            SongTab.NEW -> library.songs.sortedWith(compareByDescending<SongItem> { it.code }).take(300)
+        }
+        baseList.filter { song ->
             (artistFilter == null || song.singer == artistFilter) &&
                 (query.isBlank() || song.title.contains(query, true) || song.singer.contains(query, true))
         }.sortedWith(
             when (sortMode) {
-                SortMode.CODE -> compareByDescending<SongItem> { it.code }
                 SortMode.TITLE -> compareBy({ it.title.lowercase() }, { it.singer.lowercase() })
+                SortMode.CODE -> compareByDescending<SongItem> { it.code }
                 SortMode.ARTIST -> compareBy({ it.singer.lowercase() }, { it.title.lowercase() })
             }
         )
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TopBar(onBack = onBack, title = if (artistFilter != null) artistFilter else "Songs")
+        TopBar(onBack = onBack, title = if (artistFilter != null) artistFilter else "Song Search")
         if (artistFilter == null) {
             SearchBar(query = query, onQueryChange = { query = it }, onClear = { query = "" })
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    .padding(horizontal = 24.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                SortToggle("Code", sortMode == SortMode.CODE) { sortMode = SortMode.CODE }
-                SortToggle("Title", sortMode == SortMode.TITLE) { sortMode = SortMode.TITLE }
-                SortToggle("Artist", sortMode == SortMode.ARTIST) { sortMode = SortMode.ARTIST }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = selectedTab == SongTab.ALL,
+                        onClick = { selectedTab = SongTab.ALL },
+                        label = { Text("All Songs") }
+                    )
+                    FilterChip(
+                        selected = selectedTab == SongTab.NEW,
+                        onClick = { selectedTab = SongTab.NEW },
+                        label = { Text("New Songs") }
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SortToggle("Title", sortMode == SortMode.TITLE) { sortMode = SortMode.TITLE }
+                    SortToggle("Code", sortMode == SortMode.CODE) { sortMode = SortMode.CODE }
+                    SortToggle("Artist", sortMode == SortMode.ARTIST) { sortMode = SortMode.ARTIST }
+                }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
         }
         Text(
             text = "${filtered.size} songs",
@@ -125,7 +146,7 @@ fun SongsScreen(
             ) {
                 items(filtered, key = { it.code }) { song ->
                     SongRow(song = song, onClick = { onOpen(song) })
-                    HorizontalDivider(color = androidx.compose.ui.graphics.Color(0x14FFFFFF))
+                    HorizontalDivider(color = Color(0x14FFFFFF))
                 }
             }
         }
