@@ -972,7 +972,7 @@ private fun LyricPlayer(
 private fun StatusToastNotification(message: String) {
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = Color(0xFF0284C7).copy(alpha = 0.95f),
+        color = Color(0xFF0D9488).copy(alpha = 0.95f),
         tonalElevation = 12.dp,
         modifier = Modifier.padding(top = 16.dp)
     ) {
@@ -1013,9 +1013,11 @@ private fun KeypadControlPanel(
 ) {
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = Color(0xFF0F172A).copy(alpha = 0.92f),
+        color = Color(0xFF022C28).copy(alpha = 0.88f),
         tonalElevation = 8.dp,
-        modifier = modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+        modifier = modifier
+            .border(1.5.dp, Color(0xFF2DD4BF).copy(alpha = 0.35f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 12.dp, vertical = 4.dp)
     ) {
         Column(
             modifier = Modifier.padding(10.dp),
@@ -1029,7 +1031,7 @@ private fun KeypadControlPanel(
             ) {
                 AdjustmentPill(
                     label = "KEY: ${if (keyShift >= 0) "+$keyShift" else "$keyShift"}",
-                    containerColor = Color(0xFF9A3412),
+                    containerColor = Color(0xFF854D0E).copy(alpha = 0.85f),
                     onDecrease = { onKeyChange(keyShift - 1) },
                     onIncrease = { onKeyChange(keyShift + 1) },
                     modifier = Modifier.weight(1f)
@@ -1037,7 +1039,7 @@ private fun KeypadControlPanel(
 
                 AdjustmentPill(
                     label = "TEM: ${if (temShift >= 0) "+$temShift" else "$temShift"}",
-                    containerColor = Color(0xFF854D0E),
+                    containerColor = Color(0xFF065F46).copy(alpha = 0.85f),
                     onDecrease = { onTemChange(temShift - 1) },
                     onIncrease = { onTemChange(temShift + 1) },
                     modifier = Modifier.weight(1f)
@@ -1045,7 +1047,7 @@ private fun KeypadControlPanel(
 
                 AdjustmentPill(
                     label = "MEL: $melVol",
-                    containerColor = Color(0xFF166534),
+                    containerColor = Color(0xFF0D9488).copy(alpha = 0.85f),
                     onDecrease = { onMelChange(maxOf(0, melVol - 20)) },
                     onIncrease = { onMelChange(minOf(100, melVol + 20)) },
                     modifier = Modifier.weight(1f)
@@ -1059,8 +1061,8 @@ private fun KeypadControlPanel(
             ) {
                 KeypadButton(
                     onClick = onSearchPress,
-                    backgroundColor = Color(0xFF1E1B4B),
-                    focusedColor = Color(0xFF4338CA),
+                    backgroundColor = Color(0xFF0D9488).copy(alpha = 0.85f),
+                    focusedColor = Color(0xFF2DD4BF),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
                     Icon(Icons.Filled.Search, contentDescription = "Search", tint = Color.White, modifier = Modifier.size(18.dp))
@@ -1068,7 +1070,8 @@ private fun KeypadControlPanel(
 
                 KeypadButton(
                     onClick = onPrevPress,
-                    backgroundColor = Color(0xFF1E293B),
+                    backgroundColor = Color(0xFF0F3832).copy(alpha = 0.85f),
+                    focusedColor = Color(0xFF2DD4BF),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
                     Icon(Icons.Filled.SkipPrevious, contentDescription = "Prev", tint = Color.White, modifier = Modifier.size(18.dp))
@@ -1076,16 +1079,17 @@ private fun KeypadControlPanel(
 
                 KeypadButton(
                     onClick = onPlayPress,
-                    backgroundColor = Color(0xFF1E293B),
-                    focusedColor = Color(0xFF10B981),
+                    backgroundColor = Color(0xFF2DD4BF),
+                    focusedColor = Color(0xFF5EEAD4),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
-                    Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = "Play/Pause", tint = Color.White, modifier = Modifier.size(20.dp))
+                    Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = "Play/Pause", tint = Color(0xFF003731), modifier = Modifier.size(20.dp))
                 }
 
                 KeypadButton(
                     onClick = onNextPress,
-                    backgroundColor = Color(0xFF1E293B),
+                    backgroundColor = Color(0xFF0F3832).copy(alpha = 0.85f),
+                    focusedColor = Color(0xFF2DD4BF),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
                     Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(18.dp))
@@ -1093,7 +1097,7 @@ private fun KeypadControlPanel(
 
                 KeypadButton(
                     onClick = onStopPress,
-                    backgroundColor = Color(0xFF1E293B),
+                    backgroundColor = Color(0xFF991B1B).copy(alpha = 0.85f),
                     focusedColor = Color(0xFFEF4444),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
@@ -1112,8 +1116,8 @@ private fun KeypadControlPanel(
                 DigitKey('3', onDigitPress, Modifier.weight(1f))
                 KeypadButton(
                     onClick = onVocalToggle,
-                    backgroundColor = if (vocalActive) Color(0xFF991B1B) else Color(0xFF334155),
-                    focusedColor = Color(0xFFDC2626),
+                    backgroundColor = if (vocalActive) Color(0xFF0D9488) else Color(0xFF0F3832).copy(alpha = 0.85f),
+                    focusedColor = Color(0xFF2DD4BF),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
                     Icon(
@@ -1135,8 +1139,8 @@ private fun KeypadControlPanel(
                 DigitKey('6', onDigitPress, Modifier.weight(1f))
                 KeypadButton(
                     onClick = onRsvListPress,
-                    backgroundColor = Color(0xFF6B21A8),
-                    focusedColor = Color(0xFF9333EA),
+                    backgroundColor = Color(0xFF0D9488),
+                    focusedColor = Color(0xFF2DD4BF),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
                     Text(
@@ -1158,8 +1162,8 @@ private fun KeypadControlPanel(
                 DigitKey('9', onDigitPress, Modifier.weight(1f))
                 KeypadButton(
                     onClick = onBgvToggle,
-                    backgroundColor = Color(0xFF1E293B),
-                    focusedColor = Color(0xFF2563EB),
+                    backgroundColor = Color(0xFF0F3832).copy(alpha = 0.85f),
+                    focusedColor = Color(0xFF2DD4BF),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
                     Icon(
@@ -1178,15 +1182,15 @@ private fun KeypadControlPanel(
             ) {
                 KeypadButton(
                     onClick = { onReservePress(false) },
-                    backgroundColor = Color(0xFF065F46),
-                    focusedColor = Color(0xFF10B981),
+                    backgroundColor = Color(0xFF2DD4BF),
+                    focusedColor = Color(0xFF5EEAD4),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
                     Text(
                         text = "RES",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Black,
-                        color = Color.White
+                        color = Color(0xFF003731)
                     )
                 }
 
@@ -1194,7 +1198,7 @@ private fun KeypadControlPanel(
 
                 KeypadButton(
                     onClick = onCancelPress,
-                    backgroundColor = Color(0xFF991B1B),
+                    backgroundColor = Color(0xFF991B1B).copy(alpha = 0.85f),
                     focusedColor = Color(0xFFEF4444),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
@@ -1208,8 +1212,8 @@ private fun KeypadControlPanel(
 
                 KeypadButton(
                     onClick = { onReservePress(true) },
-                    backgroundColor = Color(0xFF1E40AF),
-                    focusedColor = Color(0xFF3B82F6),
+                    backgroundColor = Color(0xFF059669),
+                    focusedColor = Color(0xFF10B981),
                     modifier = Modifier.weight(1f).height(38.dp)
                 ) {
                     Text(
@@ -1276,15 +1280,15 @@ private fun DigitKey(
 ) {
     KeypadButton(
         onClick = { onDigitPress(digit) },
-        backgroundColor = Color(0xFF1E293B),
-        focusedColor = Color(0xFF3B82F6),
+        backgroundColor = Color(0xFF0F3832).copy(alpha = 0.85f),
+        focusedColor = Color(0xFF2DD4BF),
         modifier = modifier.height(38.dp)
     ) {
         Text(
             text = digit.toString(),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = Color.White
+            color = Color(0xFFE6FFFA)
         )
     }
 }
@@ -1294,8 +1298,8 @@ private fun DigitKey(
 private fun KeypadButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    backgroundColor: Color = Color(0xFF1E293B),
-    focusedColor: Color = Color(0xFF3B82F6),
+    backgroundColor: Color = Color(0xFF0F3832).copy(alpha = 0.85f),
+    focusedColor: Color = Color(0xFF2DD4BF),
     content: @Composable () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -1316,7 +1320,11 @@ private fun KeypadButton(
                     2.dp,
                     Color.White,
                     shape
-                ) else Modifier
+                ) else Modifier.border(
+                    1.dp,
+                    Color(0xFF2DD4BF).copy(alpha = 0.2f),
+                    shape
+                )
             )
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
