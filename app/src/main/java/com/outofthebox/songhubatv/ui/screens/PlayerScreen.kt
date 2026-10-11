@@ -86,6 +86,7 @@ import androidx.media3.ui.PlayerView
 import com.songhub.android.audio.BassMidiEngine
 import com.songhub.android.audio.SoundFontManager
 import com.songhub.android.model.LyricLine
+import com.songhub.android.parser.TempoUtils
 import com.songhub.android.song.ScoreCalculator
 import com.songhub.android.storage.BgvSettings
 import com.songhub.android.storage.LyricSettings
@@ -110,6 +111,20 @@ private val KaraokeHighlight = Color(0xFF4F46E5)
 
 /** Frame interval used while polling the MIDI transport so the wipe stays smooth. */
 private const val AUDIO_POLL_MS = 16L
+
+private fun midiPositionMs(
+    tempoMap: List<TempoUtils.TempoEntry>,
+    ticksPerBeat: Int,
+    engine: BassMidiEngine
+): Double {
+    if (ticksPerBeat > 0 && tempoMap.isNotEmpty()) {
+        val tick = engine.getTickPosition()
+        if (tick >= 0) {
+            return TempoUtils.tickToMs(tempoMap, tick, ticksPerBeat)
+        }
+    }
+    return engine.getPositionMs()
+}
 
 @Composable
 fun PlayerScreen(
@@ -137,6 +152,8 @@ fun PlayerScreen(
     LyricPlayer(
         song = song,
         lines = parsed.lines,
+        tempoMap = parsed.tempoMap,
+        ticksPerBeat = parsed.ticksPerBeat,
         totalMs = parsed.totalMs,
         context = context,
         libraryRoot = libraryRoot,
@@ -194,6 +211,8 @@ private fun LyricUnavailable(song: SongItem, error: String?, onBack: () -> Unit)
 private fun LyricPlayer(
     song: SongItem,
     lines: List<LyricLine>,
+    tempoMap: List<TempoUtils.TempoEntry>,
+    ticksPerBeat: Int,
     totalMs: Double,
     context: Context,
     libraryRoot: File,
@@ -308,7 +327,7 @@ private fun LyricPlayer(
             if (!playing) break
             if (audioReady) {
                 if (!seeking) {
-                    val ms = engine.getPositionMs()
+                    val ms = midiPositionMs(tempoMap, ticksPerBeat, engine)
                     if (ms > 0.0) posMs = ms
                 }
                 val ended = engine.hasEnded() || (effectiveTotalMs > 0.0 && posMs >= effectiveTotalMs)

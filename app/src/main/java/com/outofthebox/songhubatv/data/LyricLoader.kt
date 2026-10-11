@@ -4,6 +4,7 @@ import com.songhub.android.database.NativeLib
 import com.songhub.android.model.LyricLine
 import com.songhub.android.parser.LineBuilder
 import com.songhub.android.parser.MidiParser
+import com.songhub.android.parser.TempoUtils
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
@@ -16,7 +17,8 @@ object LyricLoader {
 
     data class Parsed(
         val lines: List<LyricLine>,
-        val tempoMap: List<Any> = emptyList(),
+        val tempoMap: List<TempoUtils.TempoEntry> = emptyList(),
+        val ticksPerBeat: Int = 0,
         val totalMs: Double = 0.0,
         val error: String? = null
     )
@@ -30,7 +32,12 @@ object LyricLoader {
             val result = MidiParser.parse(bytes, song.title)
             val lines = LineBuilder.build(result.lyricEventsTicks, "", result.ticksPerBeat)
             val totalMs = lines.maxOfOrNull { it.endMs } ?: 0.0
-            Parsed(lines = lines, totalMs = totalMs)
+            Parsed(
+                lines = lines,
+                tempoMap = result.tempoMap,
+                ticksPerBeat = result.ticksPerBeat,
+                totalMs = totalMs
+            )
         } catch (t: Throwable) {
             Parsed(emptyList(), error = t.message ?: t.toString())
         }
