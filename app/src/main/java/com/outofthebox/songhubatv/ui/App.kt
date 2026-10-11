@@ -103,6 +103,7 @@ fun App(
                 is Screen.Player -> PlayerScreen(
                     song = target.song,
                     onBack = { screen = target.back },
+                    library = libraryState,
                     libraryRoot = libraryState.root,
                     isInPipMode = isInPipMode,
                     isPipSupported = isPipSupported,

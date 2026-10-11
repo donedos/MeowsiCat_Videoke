@@ -10,11 +10,17 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -28,19 +34,31 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Camera
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -57,7 +75,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -117,27 +138,30 @@ private const val AUDIO_POLL_MS = 16L
 fun PlayerScreen(
     song: SongItem,
     onBack: () -> Unit,
-    libraryRoot: File = LibraryRepository.defaultRoot(),
+    library: LibraryRepository.Library = LibraryRepository.Library(emptyList(), emptyList(), emptyList(), emptyList(), LibraryRepository.defaultRoot()),
+    libraryRoot: File = library.root,
     isInPipMode: Boolean = false,
     isPipSupported: Boolean = false,
     onEnterPip: () -> Unit = {},
     onPlaybackStateChanged: (Boolean) -> Unit = {}
 ) {
+    var activeSong by remember(song) { mutableStateOf(song) }
     val context = LocalContext.current
     val parsed by produceState(
         initialValue = LyricLoader.Parsed(emptyList()),
-        key1 = song.code
+        key1 = activeSong.code
     ) {
-        value = LyricLoader.load(song)
+        value = LyricLoader.load(activeSong)
     }
 
-    if (parsed.error != null && parsed.lines.isEmpty()) {
-        LyricUnavailable(song = song, error = parsed.error, onBack = onBack)
+    if (parsed.error != null && parsed.lines.isEmpty() && activeSong.code != 0) {
+        LyricUnavailable(song = activeSong, error = parsed.error, onBack = onBack)
         return
     }
 
     LyricPlayer(
-        song = song,
+        song = activeSong,
+        library = library,
         lines = parsed.lines,
         tempoMap = parsed.tempoMap,
         ticksPerBeat = parsed.ticksPerBeat,
@@ -145,6 +169,7 @@ fun PlayerScreen(
         context = context,
         libraryRoot = libraryRoot,
         onBack = onBack,
+        onSelectSong = { newSong -> activeSong = newSong },
         isInPipMode = isInPipMode,
         isPipSupported = isPipSupported,
         onEnterPip = onEnterPip,
@@ -167,7 +192,7 @@ private fun LyricUnavailable(song: SongItem, error: String?, onBack: () -> Unit)
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = song.displaySinger(),
+                text = if (song.code == 0) "000000" else song.displaySinger(),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -197,6 +222,7 @@ private fun LyricUnavailable(song: SongItem, error: String?, onBack: () -> Unit)
 @Composable
 private fun LyricPlayer(
     song: SongItem,
+    library: LibraryRepository.Library,
     lines: List<LyricLine>,
     tempoMap: List<TempoUtils.TempoEntry>,
     ticksPerBeat: Int,
@@ -204,6 +230,7 @@ private fun LyricPlayer(
     context: Context,
     libraryRoot: File,
     onBack: () -> Unit,
+    onSelectSong: (SongItem) -> Unit,
     isInPipMode: Boolean,
     isPipSupported: Boolean,
     onEnterPip: () -> Unit,
@@ -217,7 +244,7 @@ private fun LyricPlayer(
         }
     }
 
-    var playing by rememberSaveable { mutableStateOf(true) }
+    var playing by rememberSaveable { mutableStateOf(song.code != 0) }
     var audioReady by rememberSaveable { mutableStateOf(false) }
     var audioNote by rememberSaveable { mutableStateOf<String?>(null) }
     var seeking by rememberSaveable { mutableStateOf(false) }
@@ -228,13 +255,21 @@ private fun LyricPlayer(
     var scoreResult by remember { mutableStateOf<ScoreResult?>(null) }
     val lyricStyle = remember { LyricSettings.getLyricStyle(context) }
 
-    // Controls visibility (auto-hide after 3 seconds, tap to show)
+    // Remote keypad, reservation & search state
+    var codeInput by rememberSaveable { mutableStateOf("") }
+    var reservationQueue by remember { mutableStateOf<List<SongItem>>(emptyList()) }
+    var showSearchDialog by rememberSaveable { mutableStateOf(false) }
+    var showRsvDialog by rememberSaveable { mutableStateOf(false) }
+    var statusToast by remember { mutableStateOf<String?>(null) }
+
+    // Controls visibility
     var controlsVisible by rememberSaveable { mutableStateOf(true) }
 
     // Key, Tempo, Melody states
     var keyShift by rememberSaveable { mutableIntStateOf(0) }
     var temShift by rememberSaveable { mutableIntStateOf(0) }
-    var melVol by rememberSaveable { mutableIntStateOf(0) }
+    var melVol by rememberSaveable { mutableIntStateOf(40) }
+    var vocalActive by rememberSaveable { mutableStateOf(true) }
 
     val effectiveTotalMs = remember(totalMs, audioDurationMs) {
         maxOf(totalMs, audioDurationMs)
@@ -246,11 +281,11 @@ private fun LyricPlayer(
 
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    // Auto-hide controls after 3 seconds when playing
-    LaunchedEffect(controlsVisible, playing) {
-        if (controlsVisible && playing) {
-            delay(3000L)
-            controlsVisible = false
+    // Auto-hide status toast after 2.5s
+    LaunchedEffect(statusToast) {
+        if (statusToast != null) {
+            delay(2500L)
+            statusToast = null
         }
     }
 
@@ -274,15 +309,16 @@ private fun LyricPlayer(
         if (song.code == 0) {
             audioReady = false
             audioNote = null
+            playing = false
             return@LaunchedEffect
         }
         if (posMs == 0.0) {
             keyShift = 0
             temShift = 0
-            melVol = 0
+            melVol = 40
             engine.setKey(0)
             engine.setTempo(100f)
-            engine.setMelodyVolume(0)
+            engine.setMelodyVolume(40)
         } else {
             engine.setKey(keyShift)
             engine.setTempo((100 + temShift * 5).toFloat())
@@ -311,8 +347,75 @@ private fun LyricPlayer(
         }
     }
 
+    // Helper functions for playback & queue actions
+    fun playNextSongInQueue() {
+        if (reservationQueue.isNotEmpty()) {
+            val nextSong = reservationQueue.first()
+            reservationQueue = reservationQueue.drop(1)
+            onSelectSong(nextSong)
+            posMs = 0.0
+            scored = false
+            playing = true
+            statusToast = "Now Playing: ${nextSong.displayTitle()}"
+        } else {
+            playing = false
+            posMs = 0.0
+            onSelectSong(SongItem.placeholder())
+            statusToast = "Playback Stopped — Select a Song"
+        }
+    }
+
+    fun handleReservePress(firstPriority: Boolean) {
+        if (codeInput.isBlank()) {
+            statusToast = "Type a song code first"
+            return
+        }
+        val targetCode = codeInput.toIntOrNull()
+        val found = if (targetCode != null) library.songs.find { it.code == targetCode } else null
+        if (found != null) {
+            if (firstPriority) {
+                reservationQueue = listOf(found) + reservationQueue
+                statusToast = "1st Priority: ${found.displayTitle()}"
+            } else {
+                reservationQueue = reservationQueue + found
+                statusToast = "Reserved #${found.code}: ${found.displayTitle()}"
+            }
+            codeInput = ""
+            if (song.code == 0) {
+                playNextSongInQueue()
+            }
+        } else {
+            statusToast = "Song #${codeInput} not found"
+            codeInput = ""
+        }
+    }
+
+    fun handlePlayPress() {
+        if (codeInput.isNotBlank()) {
+            val targetCode = codeInput.toIntOrNull()
+            val found = if (targetCode != null) library.songs.find { it.code == targetCode } else null
+            if (found != null) {
+                onSelectSong(found)
+                posMs = 0.0
+                scored = false
+                playing = true
+                codeInput = ""
+                statusToast = "Playing: ${found.displayTitle()}"
+            } else {
+                statusToast = "Song #${codeInput} not found"
+                codeInput = ""
+            }
+        } else {
+            if (song.code == 0 && reservationQueue.isNotEmpty()) {
+                playNextSongInQueue()
+            } else {
+                playing = !playing
+            }
+        }
+    }
+
     LaunchedEffect(playing, audioReady, effectiveTotalMs) {
-        while (playing) {
+        while (playing && song.code != 0) {
             if (audioReady && !seeking && !engine.isPlaying() && !engine.hasEnded()) {
                 engine.play()
             }
@@ -345,8 +448,7 @@ private fun LyricPlayer(
                         scored = true
                         scoreResult = ScoreResult(calculatedScore, message)
                     }
-                    playing = false
-                    posMs = if (effectiveTotalMs > 0.0) effectiveTotalMs else posMs
+                    playNextSongInQueue()
                 }
             } else {
                 posMs += 33.0
@@ -364,17 +466,12 @@ private fun LyricPlayer(
                         scored = true
                         scoreResult = ScoreResult(calculatedScore, message)
                     }
-                    playing = false
-                    posMs = effectiveTotalMs
+                    playNextSongInQueue()
                 }
             }
         }
-        if (audioReady && engine.isPlaying()) {
-            engine.pause()
-        }
     }
 
-    // Derived every time the transport moves instead of relaunching a coroutine each frame.
     val lineIndex = remember(lines, posMs) {
         if (lines.isEmpty()) {
             0
@@ -464,6 +561,15 @@ private fun LyricPlayer(
                 .background(Color.Black.copy(alpha = if (isLandscape) 0.55f else 0.45f))
         )
 
+        if (statusToast != null) {
+            Box(
+                modifier = Modifier.fillMaxWidth().statusBarsPadding(),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                StatusToastNotification(message = statusToast!!)
+            }
+        }
+
         if (isLandscape) {
             Column(
                 modifier = Modifier
@@ -507,6 +613,15 @@ private fun LyricPlayer(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        if (reservationQueue.isNotEmpty()) {
+                            Text(
+                                text = "Queue (${reservationQueue.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color(0xFFFBBF24),
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(end = 12.dp)
+                            )
+                        }
                         if (isPipSupported) {
                             IconButton(onClick = onEnterPip) {
                                 Icon(
@@ -528,7 +643,23 @@ private fun LyricPlayer(
                         .padding(horizontal = 32.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (song.code == 0) {
+                    if (codeInput.isNotBlank()) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Code Entry",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = codeInput.padStart(6, '0'),
+                                style = MaterialTheme.typography.displayLarge.copy(fontSize = 52.sp),
+                                fontWeight = FontWeight.Black,
+                                color = Color(0xFFFBBF24)
+                            )
+                        }
+                    } else if (song.code == 0) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 text = "Select a song",
@@ -567,127 +698,49 @@ private fun LyricPlayer(
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = Color(0xFF1E293B).copy(alpha = 0.85f),
-                        tonalElevation = 8.dp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 10.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = fmtMs(posMs),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Color.White.copy(alpha = 0.8f)
-                                )
-
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    IconButton(onClick = {
-                                        engine.restart()
-                                        posMs = 0.0
-                                        scored = false
-                                        playing = true
-                                    }) {
-                                        Icon(Icons.Filled.Refresh, contentDescription = "Restart", tint = Color.White)
-                                    }
-                                    IconButton(
-                                        onClick = {
-                                            if (playing) {
-                                                playing = false
-                                            } else {
-                                                if (posMs >= effectiveTotalMs || (audioReady && engine.isFinished())) {
-                                                    engine.restart()
-                                                    posMs = 0.0
-                                                    scored = false
-                                                }
-                                                playing = true
-                                            }
-                                        },
-                                        modifier = Modifier.size(52.dp)
-                                    ) {
-                                        Icon(
-                                            if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                            contentDescription = if (playing) "Pause" else "Play",
-                                            modifier = Modifier.size(32.dp),
-                                            tint = KaraokeHighlight
-                                        )
-                                    }
-                                }
-
-                                Text(
-                                    text = fmtMs(effectiveTotalMs),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Color.White.copy(alpha = 0.8f)
-                                )
-                            }
-
-                            Spacer(Modifier.height(6.dp))
-
-                            AdjustmentBar(
-                                keyShift = keyShift,
-                                temShift = temShift,
-                                melVol = melVol,
-                                onKeyDecrease = {
-                                    if (keyShift > -8) {
-                                        keyShift--
-                                        engine.setKey(keyShift)
-                                    }
-                                },
-                                onKeyIncrease = {
-                                    if (keyShift < 8) {
-                                        keyShift++
-                                        engine.setKey(keyShift)
-                                    }
-                                },
-                                onTemDecrease = {
-                                    if (temShift > -8) {
-                                        temShift--
-                                        engine.setTempo((100 + temShift * 5).toFloat())
-                                    }
-                                },
-                                onTemIncrease = {
-                                    if (temShift < 8) {
-                                        temShift++
-                                        engine.setTempo((100 + temShift * 5).toFloat())
-                                    }
-                                },
-                                onMelDecrease = {
-                                    if (melVol > 0) {
-                                        melVol -= 20
-                                        engine.setMelodyVolume(melVol)
-                                    }
-                                },
-                                onMelIncrease = {
-                                    if (melVol < 100) {
-                                        melVol += 20
-                                        engine.setMelodyVolume(melVol)
-                                    }
-                                }
-                            )
+                    KeypadControlPanel(
+                        keyShift = keyShift,
+                        temShift = temShift,
+                        melVol = melVol,
+                        reservationCount = reservationQueue.size,
+                        playing = playing,
+                        vocalActive = vocalActive,
+                        onKeyChange = { keyShift = it; engine.setKey(keyShift) },
+                        onTemChange = { temShift = it; engine.setTempo((100 + temShift * 5).toFloat()) },
+                        onMelChange = { melVol = it; engine.setMelodyVolume(melVol) },
+                        onDigitPress = { char ->
+                            if (codeInput.length < 6) codeInput += char
+                        },
+                        onCancelPress = {
+                            if (codeInput.isNotEmpty()) codeInput = "" else controlsVisible = false
+                        },
+                        onReservePress = { firstPriority -> handleReservePress(firstPriority) },
+                        onSearchPress = { showSearchDialog = true },
+                        onRsvListPress = { showRsvDialog = true },
+                        onPlayPress = { handlePlayPress() },
+                        onStopPress = {
+                            engine.stop()
+                            playNextSongInQueue()
+                        },
+                        onNextPress = { playNextSongInQueue() },
+                        onPrevPress = { engine.restart(); posMs = 0.0 },
+                        onVocalToggle = {
+                            vocalActive = !vocalActive
+                            melVol = if (vocalActive) 40 else 0
+                            engine.setMelodyVolume(melVol)
+                            statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
+                        },
+                        onBgvToggle = {
+                            statusToast = "BGV Switched"
                         }
-                    }
+                    )
                 }
             }
         } else {
-            // Portrait Layout
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 28.dp, vertical = 16.dp),
+                    .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 AnimatedVisibility(
@@ -741,7 +794,22 @@ private fun LyricPlayer(
 
                 Spacer(Modifier.weight(1f))
 
-                if (song.code == 0) {
+                if (codeInput.isNotBlank()) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Code Entry",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = codeInput.padStart(6, '0'),
+                            style = MaterialTheme.typography.displayLarge.copy(fontSize = 52.sp),
+                            fontWeight = FontWeight.Black,
+                            color = Color(0xFFFBBF24)
+                        )
+                    }
+                } else if (song.code == 0) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = "Select a song",
@@ -778,110 +846,42 @@ private fun LyricPlayer(
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        AdjustmentBar(
-                            keyShift = keyShift,
-                            temShift = temShift,
-                            melVol = melVol,
-                            onKeyDecrease = {
-                                if (keyShift > -8) {
-                                    keyShift--
-                                    engine.setKey(keyShift)
-                                }
-                            },
-                            onKeyIncrease = {
-                                if (keyShift < 8) {
-                                    keyShift++
-                                    engine.setKey(keyShift)
-                                }
-                            },
-                            onTemDecrease = {
-                                if (temShift > -8) {
-                                    temShift--
-                                    engine.setTempo((100 + temShift * 5).toFloat())
-                                }
-                            },
-                            onTemIncrease = {
-                                if (temShift < 8) {
-                                    temShift++
-                                    engine.setTempo((100 + temShift * 5).toFloat())
-                                }
-                            },
-                            onMelDecrease = {
-                                if (melVol > 0) {
-                                    melVol -= 20
-                                    engine.setMelodyVolume(melVol)
-                                }
-                            },
-                            onMelIncrease = {
-                                if (melVol < 100) {
-                                    melVol += 20
-                                    engine.setMelodyVolume(melVol)
-                                }
-                            }
-                        )
-
-                        Spacer(Modifier.height(8.dp))
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            IconButton(onClick = {
-                                engine.restart()
-                                posMs = 0.0
-                                scored = false
-                                playing = true
-                            }) {
-                                Icon(Icons.Filled.Refresh, contentDescription = "Restart")
-                            }
-                            IconButton(
-                                onClick = {
-                                    if (playing) {
-                                        playing = false
-                                    } else {
-                                        if (posMs >= effectiveTotalMs || (audioReady && engine.isFinished())) {
-                                            engine.restart()
-                                            posMs = 0.0
-                                            scored = false
-                                        }
-                                        playing = true
-                                    }
-                                },
-                                modifier = Modifier.size(64.dp)
-                            ) {
-                                Icon(
-                                    if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                    contentDescription = if (playing) "Pause" else "Play",
-                                    modifier = Modifier.size(40.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            Column {
-                                Text(
-                                    text = fmtMs(posMs),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = fmtMs(effectiveTotalMs),
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                    KeypadControlPanel(
+                        keyShift = keyShift,
+                        temShift = temShift,
+                        melVol = melVol,
+                        reservationCount = reservationQueue.size,
+                        playing = playing,
+                        vocalActive = vocalActive,
+                        onKeyChange = { keyShift = it; engine.setKey(keyShift) },
+                        onTemChange = { temShift = it; engine.setTempo((100 + temShift * 5).toFloat()) },
+                        onMelChange = { melVol = it; engine.setMelodyVolume(melVol) },
+                        onDigitPress = { char ->
+                            if (codeInput.length < 6) codeInput += char
+                        },
+                        onCancelPress = {
+                            if (codeInput.isNotEmpty()) codeInput = "" else controlsVisible = false
+                        },
+                        onReservePress = { firstPriority -> handleReservePress(firstPriority) },
+                        onSearchPress = { showSearchDialog = true },
+                        onRsvListPress = { showRsvDialog = true },
+                        onPlayPress = { handlePlayPress() },
+                        onStopPress = {
+                            engine.stop()
+                            playNextSongInQueue()
+                        },
+                        onNextPress = { playNextSongInQueue() },
+                        onPrevPress = { engine.restart(); posMs = 0.0 },
+                        onVocalToggle = {
+                            vocalActive = !vocalActive
+                            melVol = if (vocalActive) 40 else 0
+                            engine.setMelodyVolume(melVol)
+                            statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
+                        },
+                        onBgvToggle = {
+                            statusToast = "BGV Switched"
                         }
-                        if (audioNote != null) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = audioNote!!,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
+                    )
                 }
             }
         }
@@ -902,194 +902,598 @@ private fun LyricPlayer(
                 onDismiss = { scoreResult = null }
             )
         }
+
+        if (showSearchDialog) {
+            QuickSearchDialog(
+                songs = library.songs,
+                onDismiss = { showSearchDialog = false },
+                onPlaySong = { s ->
+                    onSelectSong(s)
+                    posMs = 0.0
+                    scored = false
+                    playing = true
+                    showSearchDialog = false
+                    statusToast = "Now Playing: ${s.displayTitle()}"
+                },
+                onReserveSong = { s ->
+                    reservationQueue = reservationQueue + s
+                    statusToast = "Reserved: ${s.displayTitle()}"
+                    if (song.code == 0) {
+                        playNextSongInQueue()
+                    }
+                }
+            )
+        }
+
+        if (showRsvDialog) {
+            ReservationListDialog(
+                queue = reservationQueue,
+                onDismiss = { showRsvDialog = false },
+                onPlayNow = { s ->
+                    reservationQueue = reservationQueue - s
+                    onSelectSong(s)
+                    posMs = 0.0
+                    scored = false
+                    playing = true
+                    showRsvDialog = false
+                    statusToast = "Now Playing: ${s.displayTitle()}"
+                },
+                onMoveUp = { idx ->
+                    if (idx > 0) {
+                        val mutable = reservationQueue.toMutableList()
+                        val item = mutable.removeAt(idx)
+                        mutable.add(idx - 1, item)
+                        reservationQueue = mutable
+                    }
+                },
+                onRemove = { s ->
+                    reservationQueue = reservationQueue - s
+                    statusToast = "Removed from Queue"
+                },
+                onClearQueue = {
+                    reservationQueue = emptyList()
+                    statusToast = "Queue Cleared"
+                }
+            )
+        }
     }
 }
 
-@OptIn(UnstableApi::class)
 @Composable
-private fun BackgroundVideoPlayer(
-    bgvDir: File?,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    if (BgvSettings.getMode(context) == 3) return // BGV disabled in Settings
-
-    val videoFiles = remember(bgvDir) {
-        if (bgvDir == null || !bgvDir.exists() || !bgvDir.isDirectory) {
-            emptyList()
-        } else {
-            bgvDir.walkTopDown().filter { file ->
-                file.isFile && file.extension.equals("mp4", ignoreCase = true)
-            }.toList()
+private fun StatusToastNotification(message: String) {
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0xFF0284C7).copy(alpha = 0.95f),
+        tonalElevation = 12.dp,
+        modifier = Modifier.padding(top = 16.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Filled.Mic, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(message, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
         }
     }
-
-    if (videoFiles.isEmpty()) return
-
-    val randomVideo = remember(videoFiles) {
-        videoFiles.random()
-    }
-
-    val exoPlayer = remember(context, randomVideo) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(randomVideo.toURI().toString()))
-            repeatMode = Player.REPEAT_MODE_ONE
-            volume = 0f
-            prepare()
-            playWhenReady = true
-        }
-    }
-
-    DisposableEffect(exoPlayer) {
-        onDispose {
-            exoPlayer.release()
-        }
-    }
-
-    AndroidView(
-        factory = { ctx ->
-            PlayerView(ctx).apply {
-                player = exoPlayer
-                useController = false
-                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-            }
-        },
-        modifier = modifier
-    )
 }
 
 @Composable
-private fun AdjustmentBar(
+private fun KeypadControlPanel(
     keyShift: Int,
     temShift: Int,
     melVol: Int,
-    onKeyDecrease: () -> Unit,
-    onKeyIncrease: () -> Unit,
-    onTemDecrease: () -> Unit,
-    onTemIncrease: () -> Unit,
-    onMelDecrease: () -> Unit,
-    onMelIncrease: () -> Unit
+    reservationCount: Int,
+    playing: Boolean,
+    vocalActive: Boolean,
+    onKeyChange: (Int) -> Unit,
+    onTemChange: (Int) -> Unit,
+    onMelChange: (Int) -> Unit,
+    onDigitPress: (Char) -> Unit,
+    onCancelPress: () -> Unit,
+    onReservePress: (firstPriority: Boolean) -> Unit,
+    onSearchPress: () -> Unit,
+    onRsvListPress: () -> Unit,
+    onPlayPress: () -> Unit,
+    onStopPress: () -> Unit,
+    onNextPress: () -> Unit,
+    onPrevPress: () -> Unit,
+    onVocalToggle: () -> Unit,
+    onBgvToggle: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0xFF0F172A).copy(alpha = 0.92f),
+        tonalElevation = 8.dp,
+        modifier = modifier.padding(horizontal = 12.dp, vertical = 4.dp)
     ) {
-        AdjustControl(
-            label = "KEY",
-            valueDisplay = if (keyShift > 0) "+$keyShift" else "$keyShift",
-            onDecrease = onKeyDecrease,
-            onIncrease = onKeyIncrease,
-            modifier = Modifier.weight(1f)
-        )
-        AdjustControl(
-            label = "TEM",
-            valueDisplay = if (temShift > 0) "+$temShift" else "$temShift",
-            onDecrease = onTemDecrease,
-            onIncrease = onTemIncrease,
-            modifier = Modifier.weight(1f)
-        )
-        AdjustControl(
-            label = "MEL",
-            valueDisplay = "$melVol",
-            onDecrease = onMelDecrease,
-            onIncrease = onMelIncrease,
-            modifier = Modifier.weight(1f)
-        )
+        Column(
+            modifier = Modifier.padding(10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Row 1: Key, Tempo, Melody Adjustment Pills
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                AdjustmentPill(
+                    label = "KEY: ${if (keyShift >= 0) "+$keyShift" else "$keyShift"}",
+                    containerColor = Color(0xFF9A3412),
+                    onDecrease = { onKeyChange(keyShift - 1) },
+                    onIncrease = { onKeyChange(keyShift + 1) },
+                    modifier = Modifier.weight(1f)
+                )
+
+                AdjustmentPill(
+                    label = "TEM: ${if (temShift >= 0) "+$temShift" else "$temShift"}",
+                    containerColor = Color(0xFF854D0E),
+                    onDecrease = { onTemChange(temShift - 1) },
+                    onIncrease = { onTemChange(temShift + 1) },
+                    modifier = Modifier.weight(1f)
+                )
+
+                AdjustmentPill(
+                    label = "MEL: $melVol",
+                    containerColor = Color(0xFF166534),
+                    onDecrease = { onMelChange(maxOf(0, melVol - 20)) },
+                    onIncrease = { onMelChange(minOf(100, melVol + 20)) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Row 2: Search, Prev, Play/Pause, Next, Stop
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                KeypadButton(
+                    onClick = onSearchPress,
+                    backgroundColor = Color(0xFF1E1B4B),
+                    focusedColor = Color(0xFF4338CA),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Icon(Icons.Filled.Search, contentDescription = "Search", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+
+                KeypadButton(
+                    onClick = onPrevPress,
+                    backgroundColor = Color(0xFF1E293B),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Icon(Icons.Filled.SkipPrevious, contentDescription = "Prev", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+
+                KeypadButton(
+                    onClick = onPlayPress,
+                    backgroundColor = Color(0xFF1E293B),
+                    focusedColor = Color(0xFF10B981),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, contentDescription = "Play/Pause", tint = Color.White, modifier = Modifier.size(20.dp))
+                }
+
+                KeypadButton(
+                    onClick = onNextPress,
+                    backgroundColor = Color(0xFF1E293B),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+
+                KeypadButton(
+                    onClick = onStopPress,
+                    backgroundColor = Color(0xFF1E293B),
+                    focusedColor = Color(0xFFEF4444),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Icon(Icons.Filled.Stop, contentDescription = "Stop", tint = Color.White, modifier = Modifier.size(18.dp))
+                }
+            }
+
+            // 4x4 Keypad Grid
+            // Row 1: 1, 2, 3, Vocal Dot
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DigitKey('1', onDigitPress, Modifier.weight(1f))
+                DigitKey('2', onDigitPress, Modifier.weight(1f))
+                DigitKey('3', onDigitPress, Modifier.weight(1f))
+                KeypadButton(
+                    onClick = onVocalToggle,
+                    backgroundColor = if (vocalActive) Color(0xFF991B1B) else Color(0xFF334155),
+                    focusedColor = Color(0xFFDC2626),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Icon(
+                        imageVector = if (vocalActive) Icons.Filled.Mic else Icons.Filled.MicOff,
+                        contentDescription = "Vocal",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Row 2: 4, 5, 6, RSV List
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DigitKey('4', onDigitPress, Modifier.weight(1f))
+                DigitKey('5', onDigitPress, Modifier.weight(1f))
+                DigitKey('6', onDigitPress, Modifier.weight(1f))
+                KeypadButton(
+                    onClick = onRsvListPress,
+                    backgroundColor = Color(0xFF6B21A8),
+                    focusedColor = Color(0xFF9333EA),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Text(
+                        text = if (reservationCount > 0) "RSV ($reservationCount)" else "RSV List",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+
+            // Row 3: 7, 8, 9, Camera/BGV
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                DigitKey('7', onDigitPress, Modifier.weight(1f))
+                DigitKey('8', onDigitPress, Modifier.weight(1f))
+                DigitKey('9', onDigitPress, Modifier.weight(1f))
+                KeypadButton(
+                    onClick = onBgvToggle,
+                    backgroundColor = Color(0xFF1E293B),
+                    focusedColor = Color(0xFF2563EB),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Camera,
+                        contentDescription = "BGV Toggle",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Row 4: RES, 0, CAN, 1st RSV
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                KeypadButton(
+                    onClick = { onReservePress(false) },
+                    backgroundColor = Color(0xFF065F46),
+                    focusedColor = Color(0xFF10B981),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Text(
+                        text = "RES",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White
+                    )
+                }
+
+                DigitKey('0', onDigitPress, Modifier.weight(1f))
+
+                KeypadButton(
+                    onClick = onCancelPress,
+                    backgroundColor = Color(0xFF991B1B),
+                    focusedColor = Color(0xFFEF4444),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Text(
+                        text = "CAN",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White
+                    )
+                }
+
+                KeypadButton(
+                    onClick = { onReservePress(true) },
+                    backgroundColor = Color(0xFF1E40AF),
+                    focusedColor = Color(0xFF3B82F6),
+                    modifier = Modifier.weight(1f).height(38.dp)
+                ) {
+                    Text(
+                        text = "1st RSV",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+        }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AdjustControl(
+private fun AdjustmentPill(
     label: String,
-    valueDisplay: String,
+    containerColor: Color,
     onDecrease: () -> Unit,
     onIncrease: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+    Row(
         modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(containerColor)
+            .padding(horizontal = 2.dp, vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 2.dp, vertical = 2.dp)
+        KeypadButton(
+            onClick = onDecrease,
+            backgroundColor = Color.Transparent,
+            focusedColor = Color.White.copy(alpha = 0.3f),
+            modifier = Modifier.size(30.dp)
         ) {
-            IconButton(
-                onClick = onDecrease,
-                modifier = Modifier.size(32.dp)
+            Icon(Icons.Filled.Remove, contentDescription = "Decrease", tint = Color.White, modifier = Modifier.size(14.dp))
+        }
+
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+        )
+
+        KeypadButton(
+            onClick = onIncrease,
+            backgroundColor = Color.Transparent,
+            focusedColor = Color.White.copy(alpha = 0.3f),
+            modifier = Modifier.size(30.dp)
+        ) {
+            Icon(Icons.Filled.Add, contentDescription = "Increase", tint = Color.White, modifier = Modifier.size(14.dp))
+        }
+    }
+}
+
+@Composable
+private fun DigitKey(
+    digit: Char,
+    onDigitPress: (Char) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    KeypadButton(
+        onClick = { onDigitPress(digit) },
+        backgroundColor = Color(0xFF1E293B),
+        focusedColor = Color(0xFF3B82F6),
+        modifier = modifier.height(38.dp)
+    ) {
+        Text(
+            text = digit.toString(),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.White
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun KeypadButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    backgroundColor: Color = Color(0xFF1E293B),
+    focusedColor: Color = Color(0xFF3B82F6),
+    content: @Composable () -> Unit
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "scale")
+    val bg by animateColorAsState(
+        targetValue = if (focused) focusedColor else backgroundColor,
+        label = "bg"
+    )
+    val shape = RoundedCornerShape(10.dp)
+
+    Box(
+        modifier = modifier
+            .scale(scale)
+            .clip(shape)
+            .background(bg)
+            .then(
+                if (focused) Modifier.border(
+                    2.dp,
+                    Color.White,
+                    shape
+                ) else Modifier
+            )
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+                onLongClick = onClick
+            )
+            .onFocusChanged { focused = it.isFocused },
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun QuickSearchDialog(
+    songs: List<SongItem>,
+    onDismiss: () -> Unit,
+    onPlaySong: (SongItem) -> Unit,
+    onReserveSong: (SongItem) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(songs, query) {
+        if (query.isBlank()) songs.take(40)
+        else songs.filter {
+            it.title.contains(query, ignoreCase = true) || it.singer.contains(query, ignoreCase = true) || it.code.toString().contains(query)
+        }.take(40)
+    }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFF0F172A).copy(alpha = 0.95f),
+        tonalElevation = 16.dp
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.Filled.Remove,
-                    contentDescription = "Decrease $label",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
-                )
+                Text("Song Search", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color.White)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Clear, contentDescription = "Close", tint = Color.White)
+                }
             }
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 2.dp)
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Type song title, artist, or code...") },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp)
+            )
+            Spacer(Modifier.height(12.dp))
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
             ) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelSmall,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    softWrap = false
-                )
-                Text(
-                    text = valueDisplay,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
-            IconButton(
-                onClick = onIncrease,
-                modifier = Modifier.size(32.dp)
-            ) {
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = "Increase $label",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp)
-                )
+                items(filtered, key = { it.code }) { song ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1E293B))
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(song.displayTitle(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("${song.displaySinger()} • #${song.code}", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+                        }
+                        KeypadButton(
+                            onClick = { onPlaySong(song) },
+                            backgroundColor = Color(0xFF059669),
+                            modifier = Modifier.padding(end = 8.dp).height(36.dp).width(64.dp)
+                        ) {
+                            Text("Play", style = MaterialTheme.typography.labelLarge, color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                        KeypadButton(
+                            onClick = { onReserveSong(song) },
+                            backgroundColor = Color(0xFF2563EB),
+                            modifier = Modifier.height(36.dp).width(64.dp)
+                        ) {
+                            Text("RES", style = MaterialTheme.typography.labelLarge, color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun rememberLyricFontFamily(): FontFamily {
-    val context = LocalContext.current
-    return remember(context) {
-        val customPath = LyricSettings.getCustomFontPath(context)
-        if (!customPath.isNullOrEmpty()) {
-            try {
-                val customFile = File(customPath)
-                if (customFile.exists()) {
-                    return@remember FontFamily(Font(customFile))
+private fun ReservationListDialog(
+    queue: List<SongItem>,
+    onDismiss: () -> Unit,
+    onPlayNow: (SongItem) -> Unit,
+    onMoveUp: (Int) -> Unit,
+    onRemove: (SongItem) -> Unit,
+    onClearQueue: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0xFF0F172A).copy(alpha = 0.95f),
+        tonalElevation = 16.dp
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Reserved Songs (${queue.size})", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color.White)
+                Row {
+                    if (queue.isNotEmpty()) {
+                        KeypadButton(
+                            onClick = onClearQueue,
+                            backgroundColor = Color(0xFF991B1B),
+                            modifier = Modifier.height(36.dp).padding(end = 12.dp)
+                        ) {
+                            Text("Clear Queue", style = MaterialTheme.typography.bodySmall, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Filled.Clear, contentDescription = "Close", tint = Color.White)
+                    }
                 }
-            } catch (_: Exception) {
             }
-        }
-        try {
-            FontFamily(Font(R.font.videoke))
-        } catch (_: Exception) {
-            FontFamily.Default
+            Spacer(Modifier.height(12.dp))
+            if (queue.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No reserved songs in queue", style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.6f))
+                }
+            } else {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    itemsIndexed(queue, key = { index, song -> "${song.code}_$index" }) { index, song ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF1E293B))
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("${index + 1}.", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFFFBBF24), modifier = Modifier.width(36.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(song.displayTitle(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("${song.displaySinger()} • #${song.code}", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+                            }
+                            KeypadButton(
+                                onClick = { onPlayNow(song) },
+                                backgroundColor = Color(0xFF059669),
+                                modifier = Modifier.padding(end = 6.dp).height(36.dp)
+                            ) {
+                                Text("Play", style = MaterialTheme.typography.labelMedium, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+                            }
+                            if (index > 0) {
+                                KeypadButton(
+                                    onClick = { onMoveUp(index) },
+                                    backgroundColor = Color(0xFF334155),
+                                    modifier = Modifier.padding(end = 6.dp).height(36.dp)
+                                ) {
+                                    Text("▲", style = MaterialTheme.typography.labelMedium, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+                                }
+                            }
+                            KeypadButton(
+                                onClick = { onRemove(song) },
+                                backgroundColor = Color(0xFF991B1B),
+                                modifier = Modifier.height(36.dp)
+                            ) {
+                                Text("Del", style = MaterialTheme.typography.labelMedium, color = Color.White, modifier = Modifier.padding(horizontal = 8.dp))
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1150,26 +1554,14 @@ private fun KaraokeStack(
         )
     }
 
-    // Alternating 2-line videoke slot logic:
-    // If lineIndex is even (% 2 == 0): Slot 1 (Top) is Active, Slot 2 (Bottom) is Upcoming.
-    // If lineIndex is odd (% 2 == 1): Slot 1 (Top) is Upcoming, Slot 2 (Bottom) is Active.
     val isEven = lineIndex % 2 == 0
     val topLine = if (isEven) lines.getOrNull(lineIndex) else lines.getOrNull(lineIndex + 1)
     val bottomLine = if (isEven) lines.getOrNull(lineIndex + 1) else lines.getOrNull(lineIndex)
-
-    LaunchedEffect(lineIndex) {
-        val dbg = lines.getOrNull(lineIndex) ?: return@LaunchedEffect
-        Log.i("KaraokeDebug", "line=$lineIndex start=${dbg.startMs} end=${dbg.endMs} frags=${dbg.fragments.size}")
-        dbg.fragments.forEachIndexed { i, f ->
-            Log.i("KaraokeDebug", "  f$i '${f.text.replace("\n", "\\n")}' abs=${f.absMs} end=${f.endMs} durT=${f.durationTicks}")
-        }
-    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // Slot 1: Top Line
         if (topLine != null) {
             if (isEven) {
                 KaraokeLine(
@@ -1193,7 +1585,6 @@ private fun KaraokeStack(
 
         Spacer(Modifier.height(24.dp))
 
-        // Slot 2: Bottom Line
         if (bottomLine != null) {
             if (!isEven) {
                 KaraokeLine(
@@ -1303,10 +1694,8 @@ private fun KaraokeLine(
         val progressPx = karaokeProgressPx(line, posMs, fragmentWidths, currentTick) * scale
 
         Box {
-            // Unfilled text: black outline behind white fill
             Text(text, style = strokeStyle, color = Color.Black, maxLines = 1, softWrap = false)
             Text(text, style = style, color = Color.White, maxLines = 1, softWrap = false)
-            // Filled text: white outline behind indigo fill, clipped to progress
             Box(
                 modifier = Modifier.drawWithContent {
                     clipRect(right = progressPx.coerceIn(0f, size.width)) {
@@ -1338,13 +1727,6 @@ private fun DimLine(text: String) {
     )
 }
 
-/**
- * Distance, in unscaled text pixels, that the melody has advanced through [line].
- *
- * Every syllable contributes its own measured width: completed syllables add their full width and
- * the syllable currently being sung adds a time-weighted fraction of its width. Instrumental gaps
- * between syllables hold the wipe still, so the highlight tracks the vocals rather than the clock.
- */
 private fun karaokeProgressPx(
     line: LyricLine,
     posMs: Double,
@@ -1415,6 +1797,78 @@ private fun karaokeProgressPx(
         }
     }
     return progressed.coerceIn(0f, totalWidth)
+}
+
+@Composable
+private fun rememberLyricFontFamily(): FontFamily {
+    val context = LocalContext.current
+    val customPath = LyricSettings.getCustomFontPath(context)
+
+    return remember(customPath) {
+        if (!customPath.isNullAndBlank()) {
+            val file = File(customPath)
+            if (file.isFile) {
+                try {
+                    return@remember FontFamily(Font(file))
+                } catch (t: Throwable) {
+                    Log.w("PlayerScreen", "Failed to load font at $customPath", t)
+                }
+            }
+        }
+        FontFamily.Default
+    }
+}
+
+private fun String?.isNullAndBlank(): Boolean = this == null || this.isBlank()
+
+@OptIn(UnstableApi::class)
+@Composable
+private fun BackgroundVideoPlayer(
+    bgvDir: File,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val videos = remember(bgvDir) {
+        if (!bgvDir.isDirectory) emptyList()
+        else bgvDir.listFiles { _, name ->
+            val lower = name.lowercase()
+            lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".avi")
+        }?.toList() ?: emptyList()
+    }
+
+    if (videos.isEmpty()) {
+        Box(modifier = modifier.background(Color.Black))
+        return
+    }
+
+    val randomVideo = remember(videos) { videos.random() }
+
+    val exoPlayer = remember(context, randomVideo) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(randomVideo.absolutePath))
+            repeatMode = Player.REPEAT_MODE_ONE
+            volume = 0f
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        onDispose {
+            exoPlayer.release()
+        }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                player = exoPlayer
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            }
+        },
+        modifier = modifier
+    )
 }
 
 private fun fmtMs(ms: Double): String {

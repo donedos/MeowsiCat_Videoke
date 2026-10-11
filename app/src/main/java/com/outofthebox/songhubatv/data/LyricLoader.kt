@@ -176,8 +176,17 @@ object LyricLoader {
 
     private fun splitWords(text: String): List<String> {
         val matcher = Regex("\\S+\\s*").findAll(text)
-        val words = matcher.map { it.value }.toList()
+        val words = matcher.map { it.value }.toMutableList()
         if (words.isEmpty()) return listOf(text)
+        val parenOnly = Regex("^[()\\s]+$")
+        while (words.size > 1 && parenOnly.matches(words[0].trim())) {
+            words[1] = words[0] + words[1]
+            words.removeAt(0)
+        }
+        while (words.size > 1 && parenOnly.matches(words[words.size - 1].trim())) {
+            words[words.size - 2] = words[words.size - 2] + words[words.size - 1]
+            words.removeAt(words.size - 1)
+        }
         return words
     }
 
@@ -225,14 +234,7 @@ object LyricLoader {
                 }
                 endTick = candidate ?: target.coerceAtLeast(prevTick + 1)
             }
-            if (endTick <= startTick) {
-                if (isLast && endTick <= startTick) {
-                    endTick = startTick + 1
-                }
-                if (!isLast && endTick <= startTick) {
-                    continue
-                }
-            }
+            if (endTick <= startTick) endTick = startTick + 1
             val startMs = if (startTick == windowStart) {
                 fragment.absMs
             } else {
