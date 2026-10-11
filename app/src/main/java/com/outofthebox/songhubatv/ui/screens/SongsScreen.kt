@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -86,28 +87,53 @@ fun SongsScreen(
         TopBar(onBack = onBack, title = if (artistFilter != null) artistFilter else "Song Search")
         if (artistFilter == null) {
             SearchBar(query = query, onQueryChange = { query = it }, onClear = { query = "" })
-            Row(
+            LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 24.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
                     FilterChip(
                         selected = selectedTab == SongTab.ALL,
                         onClick = { selectedTab = SongTab.ALL },
                         label = { Text("All Songs") }
                     )
+                }
+                item {
                     FilterChip(
                         selected = selectedTab == SongTab.NEW,
                         onClick = { selectedTab = SongTab.NEW },
                         label = { Text("New Songs") }
                     )
                 }
-                Spacer(Modifier.weight(1f))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .height(20.dp)
+                                .width(1.dp)
+                                .background(MaterialTheme.colorScheme.outlineVariant)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Sort:",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                item {
                     SortToggle("Title", sortMode == SortMode.TITLE) { sortMode = SortMode.TITLE }
+                }
+                item {
                     SortToggle("Code", sortMode == SortMode.CODE) { sortMode = SortMode.CODE }
+                }
+                item {
                     SortToggle("Artist", sortMode == SortMode.ARTIST) { sortMode = SortMode.ARTIST }
                 }
             }
