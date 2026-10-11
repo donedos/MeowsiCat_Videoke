@@ -613,20 +613,20 @@ private fun LyricPlayer(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = if (song.code == 0) "000000" else "${song.displaySinger()} • ${song.code}",
+                                text = buildString {
+                                    append("%06d".format(song.code))
+                                    if (song.code != 0 && song.displaySinger().isNotBlank() && song.displaySinger() != "Unknown") {
+                                        append(" • ").append(song.displaySinger())
+                                    }
+                                    if (reservationQueue.isNotEmpty()) {
+                                        append(" • R: ").append(reservationQueue.size)
+                                    }
+                                },
                                 style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.7f),
+                                color = Color(0xFF2DD4BF),
+                                fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        if (reservationQueue.isNotEmpty()) {
-                            Text(
-                                text = "Queue (${reservationQueue.size})",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Color(0xFFFBBF24),
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(end = 12.dp)
                             )
                         }
                         if (isPipSupported) {
@@ -792,13 +792,18 @@ private fun LyricPlayer(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = if (song.code == 0) "000000" else buildString {
-                                    append(song.displaySinger())
-                                    if (song.style.isNotBlank()) append(" • ").append(song.style)
-                                    append(" • ").append(song.code)
+                                text = buildString {
+                                    append("%06d".format(song.code))
+                                    if (song.code != 0 && song.displaySinger().isNotBlank() && song.displaySinger() != "Unknown") {
+                                        append(" • ").append(song.displaySinger())
+                                    }
+                                    if (reservationQueue.isNotEmpty()) {
+                                        append(" • R: ").append(reservationQueue.size)
+                                    }
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = Color(0xFF2DD4BF),
+                                fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
