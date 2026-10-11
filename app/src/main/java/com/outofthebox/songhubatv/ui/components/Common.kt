@@ -1,7 +1,9 @@
 package com.outofthebox.songhubatv.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -33,11 +35,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 
 @Composable
 fun TopBar(onBack: (() -> Unit)?, title: String) {
@@ -125,6 +130,72 @@ fun FocusableCard(
             .onFocusChanged { focused = it.isFocused }
     ) {
         content()
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun NetflixCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    shape: RoundedCornerShape = RoundedCornerShape(18.dp),
+    content: @Composable () -> Unit
+) {
+    var focused by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (focused) 1.12f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "netflix-scale"
+    )
+    val lift by animateFloatAsState(if (focused) 1f else 0f, label = "lift")
+    val scrim by animateFloatAsState(if (focused) 0f else 0.24f, label = "scrim")
+    val bg by animateColorAsState(
+        targetValue = if (focused) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        label = "bg"
+    )
+    Box(
+        modifier = modifier
+            .zIndex(if (focused) 1f else 0f)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationY = -lift * 8.dp.toPx()
+            }
+            .shadow(
+                elevation = 4.dp + (20f * lift).dp,
+                shape = shape,
+                spotColor = MaterialTheme.colorScheme.primary
+            )
+            .clip(shape)
+            .background(bg)
+            .then(
+                if (focused) Modifier.border(
+                    3.dp,
+                    MaterialTheme.colorScheme.primary,
+                    shape
+                ) else Modifier
+            )
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+                onLongClick = onClick
+            )
+            .onFocusChanged { focused = it.isFocused }
+    ) {
+        content()
+        Box(
+            Modifier
+                .matchParentSize()
+                .background(Color.Black.copy(alpha = scrim))
+        )
     }
 }
 

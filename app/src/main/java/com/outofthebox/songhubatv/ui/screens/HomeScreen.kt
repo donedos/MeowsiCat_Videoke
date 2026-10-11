@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,9 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayCircle
@@ -31,11 +30,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.outofthebox.songhubatv.data.LibraryRepository
 import com.outofthebox.songhubatv.data.SongItem
 import com.outofthebox.songhubatv.ui.components.FocusableCard
+import com.outofthebox.songhubatv.ui.components.NetflixCard
 
 data class CategoryCardData(
     val title: String,
@@ -55,6 +56,7 @@ fun HomeScreen(
     onOpenRankings: () -> Unit = {},
     onOpenSong: (SongItem) -> Unit = {}
 ) {
+    val isWide = LocalConfiguration.current.screenWidthDp >= 720
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -66,7 +68,6 @@ fun HomeScreen(
                     )
                 )
             )
-            .verticalScroll(rememberScrollState())
             .padding(32.dp)
     ) {
         Spacer(Modifier.height(16.dp))
@@ -116,47 +117,103 @@ fun HomeScreen(
         }
 
         Spacer(Modifier.height(28.dp))
-        CategoryRow(
-            items = listOf(
-                CategoryCardData("Karaoke Player", "Select & play songs", Icons.Filled.PlayCircle, onOpenPlayer),
-                CategoryCardData("Song Search", "Find by title or singer", Icons.Filled.Search, onOpenSongs),
-                CategoryCardData("Remote", "Mobile remote control", Icons.Filled.SettingsRemote, { }),
-                CategoryCardData("Settings", "Content & display", Icons.Filled.Settings, onOpenSettings)
-            )
+        val items = listOf(
+            CategoryCardData("Karaoke Player", "Select & play songs", Icons.Filled.PlayCircle, onOpenPlayer),
+            CategoryCardData("Song Search", "Find by title or singer", Icons.Filled.Search, onOpenSongs),
+            CategoryCardData("Remote", "Mobile remote control", Icons.Filled.SettingsRemote, { }),
+            CategoryCardData("Settings", "Content & display", Icons.Filled.Settings, onOpenSettings)
         )
+        if (isWide) {
+            CategoryRow(items, netflix = true)
+        } else {
+            CategoryGrid(items)
+        }
     }
 }
 
 @Composable
-private fun CategoryRow(items: List<CategoryCardData>) {
-    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        items(items, key = { it.title }) { item ->
-            FocusableCard(
-                onClick = item.onClick,
+private fun CategoryGrid(items: List<CategoryCardData>) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        items.chunked(2).forEach { pair ->
+            Row(
                 modifier = Modifier
-                    .size(width = 220.dp, height = 140.dp)
-                    .padding(14.dp)
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Icon(
-                        imageVector = item.icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = item.subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                pair.forEach { item ->
+                    CategoryCardFace(
+                        item = item,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        netflix = false
                     )
                 }
+                if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
+    }
+}
+
+@Composable
+private fun CategoryRow(items: List<CategoryCardData>, netflix: Boolean) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(if (netflix) 24.dp else 16.dp)
+    ) {
+        items(items, key = { it.title }) { item ->
+            CategoryCardFace(
+                item = item,
+                modifier = if (netflix) {
+                    Modifier.size(width = 240.dp, height = 150.dp)
+                } else {
+                    Modifier
+                        .size(width = 220.dp, height = 140.dp)
+                        .padding(14.dp)
+                },
+                netflix = netflix
+            )
+        }
+    }
+}
+
+@Composable
+private fun CategoryCardFace(item: CategoryCardData, modifier: Modifier, netflix: Boolean) {
+    if (netflix) {
+        NetflixCard(onClick = item.onClick, modifier = modifier) {
+            CategoryCardContent(item)
+        }
+    } else {
+        FocusableCard(onClick = item.onClick, modifier = modifier) {
+            CategoryCardContent(item)
+        }
+    }
+}
+
+@Composable
+private fun CategoryCardContent(item: CategoryCardData) {
+    Column(modifier = Modifier.padding(16.dp)) {
+        Icon(
+            imageVector = item.icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(32.dp)
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = item.subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

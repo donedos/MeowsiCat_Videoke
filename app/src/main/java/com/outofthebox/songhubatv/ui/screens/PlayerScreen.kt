@@ -22,12 +22,15 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.IntOffset
 import kotlin.math.roundToInt
@@ -665,58 +668,65 @@ private fun LyricPlayer(
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    KeypadControlPanel(
-                        keyShift = keyShift,
-                        temShift = temShift,
-                        melVol = melVol,
-                        reservationCount = reservationQueue.size,
-                        playing = playing,
-                        vocalActive = vocalActive,
-                        onKeyChange = { keyShift = it; engine.setKey(keyShift) },
-                        onTemChange = { temShift = it; engine.setTempo((100 + temShift * 5).toFloat()) },
-                        onMelChange = { melVol = it; engine.setMelodyVolume(melVol) },
-                        onDigitPress = { char ->
-                            if (codeInput.length < 6) codeInput += char
-                        },
-                        onCancelPress = {
-                            if (codeInput.isNotEmpty()) codeInput = "" else controlsVisible = false
-                        },
-                        onReservePress = { firstPriority -> handleReservePress(firstPriority) },
-                        onSearchPress = { showSearchDialog = true },
-                        onRsvListPress = { showRsvDialog = true },
-                        onPlayPress = { handlePlayPress() },
-                        onStopPress = {
-                            engine.stop()
-                            playNextSongInQueue()
-                        },
-                        onNextPress = {
-                            if (reservationQueue.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ReserveQueueTicker(queue = reservationQueue)
+                        KeypadControlPanel(
+                            keyShift = keyShift,
+                            temShift = temShift,
+                            melVol = melVol,
+                            reservationCount = reservationQueue.size,
+                            playing = playing,
+                            vocalActive = vocalActive,
+                            onKeyChange = { keyShift = it; engine.setKey(keyShift) },
+                            onTemChange = { temShift = it; engine.setTempo((100 + temShift * 5).toFloat()) },
+                            onMelChange = { melVol = it; engine.setMelodyVolume(melVol) },
+                            onDigitPress = { char ->
+                                if (codeInput.length < 6) codeInput += char
+                            },
+                            onCancelPress = {
+                                if (codeInput.isNotEmpty()) codeInput = "" else controlsVisible = false
+                            },
+                            onReservePress = { firstPriority -> handleReservePress(firstPriority) },
+                            onSearchPress = { showSearchDialog = true },
+                            onRsvListPress = { showRsvDialog = true },
+                            onPlayPress = { handlePlayPress() },
+                            onStopPress = {
+                                engine.stop()
                                 playNextSongInQueue()
-                            } else {
+                            },
+                            onNextPress = {
+                                if (reservationQueue.isNotEmpty()) {
+                                    playNextSongInQueue()
+                                } else {
+                                    engine.restart()
+                                    engine.seekMs(0.0)
+                                    posMs = 0.0
+                                    posTick = 0L
+                                    statusToast = "No reserved songs in queue"
+                                }
+                            },
+                            onPrevPress = {
                                 engine.restart()
                                 engine.seekMs(0.0)
                                 posMs = 0.0
                                 posTick = 0L
-                                statusToast = "No reserved songs in queue"
+                            },
+                            onVocalToggle = {
+                                vocalActive = !vocalActive
+                                melVol = if (vocalActive) 40 else 0
+                                engine.setMelodyVolume(melVol)
+                                statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
+                            },
+                            onBgvToggle = {
+                                bgvIndex++
+                                statusToast = "BGV Switched"
                             }
-                        },
-                        onPrevPress = {
-                            engine.restart()
-                            engine.seekMs(0.0)
-                            posMs = 0.0
-                            posTick = 0L
-                        },
-                        onVocalToggle = {
-                            vocalActive = !vocalActive
-                            melVol = if (vocalActive) 40 else 0
-                            engine.setMelodyVolume(melVol)
-                            statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
-                        },
-                        onBgvToggle = {
-                            bgvIndex++
-                            statusToast = "BGV Switched"
-                        }
-                    )
+                        )
+                    }
                 }
             }
         } else {
@@ -792,57 +802,64 @@ private fun LyricPlayer(
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
-                    KeypadControlPanel(
-                        keyShift = keyShift,
-                        temShift = temShift,
-                        melVol = melVol,
-                        reservationCount = reservationQueue.size,
-                        playing = playing,
-                        vocalActive = vocalActive,
-                        onKeyChange = { keyShift = it; engine.setKey(keyShift) },
-                        onTemChange = { temShift = it; engine.setTempo((100 + temShift * 5).toFloat()) },
-                        onMelChange = { melVol = it; engine.setMelodyVolume(melVol) },
-                        onDigitPress = { char ->
-                            if (codeInput.length < 6) codeInput += char
-                        },
-                        onCancelPress = {
-                            if (codeInput.isNotEmpty()) codeInput = "" else controlsVisible = false
-                        },
-                        onReservePress = { firstPriority -> handleReservePress(firstPriority) },
-                        onSearchPress = { showSearchDialog = true },
-                        onRsvListPress = { showRsvDialog = true },
-                        onPlayPress = { handlePlayPress() },
-                        onStopPress = {
-                            engine.stop()
-                            playNextSongInQueue()
-                        },
-                        onNextPress = {
-                            if (reservationQueue.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        ReserveQueueTicker(queue = reservationQueue)
+                        KeypadControlPanel(
+                            keyShift = keyShift,
+                            temShift = temShift,
+                            melVol = melVol,
+                            reservationCount = reservationQueue.size,
+                            playing = playing,
+                            vocalActive = vocalActive,
+                            onKeyChange = { keyShift = it; engine.setKey(keyShift) },
+                            onTemChange = { temShift = it; engine.setTempo((100 + temShift * 5).toFloat()) },
+                            onMelChange = { melVol = it; engine.setMelodyVolume(melVol) },
+                            onDigitPress = { char ->
+                                if (codeInput.length < 6) codeInput += char
+                            },
+                            onCancelPress = {
+                                if (codeInput.isNotEmpty()) codeInput = "" else controlsVisible = false
+                            },
+                            onReservePress = { firstPriority -> handleReservePress(firstPriority) },
+                            onSearchPress = { showSearchDialog = true },
+                            onRsvListPress = { showRsvDialog = true },
+                            onPlayPress = { handlePlayPress() },
+                            onStopPress = {
+                                engine.stop()
                                 playNextSongInQueue()
-                            } else {
+                            },
+                            onNextPress = {
+                                if (reservationQueue.isNotEmpty()) {
+                                    playNextSongInQueue()
+                                } else {
+                                    engine.restart()
+                                    engine.seekMs(0.0)
+                                    posMs = 0.0
+                                    posTick = 0L
+                                    statusToast = "No reserved songs in queue"
+                                }
+                            },
+                            onPrevPress = {
                                 engine.restart()
                                 engine.seekMs(0.0)
                                 posMs = 0.0
                                 posTick = 0L
-                                statusToast = "No reserved songs in queue"
+                            },
+                            onVocalToggle = {
+                                vocalActive = !vocalActive
+                                melVol = if (vocalActive) 40 else 0
+                                engine.setMelodyVolume(melVol)
+                                statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
+                            },
+                            onBgvToggle = {
+                                statusToast = "BGV Switched"
                             }
-                        },
-                        onPrevPress = {
-                            engine.restart()
-                            engine.seekMs(0.0)
-                            posMs = 0.0
-                            posTick = 0L
-                        },
-                        onVocalToggle = {
-                            vocalActive = !vocalActive
-                            melVol = if (vocalActive) 40 else 0
-                            engine.setMelodyVolume(melVol)
-                            statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
-                        },
-                        onBgvToggle = {
-                            statusToast = "BGV Switched"
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -2126,6 +2143,85 @@ private fun PlayerCenterContent(
                 )
             } else {
                 LyricStack(lines = lines, lineIndex = lineIndex)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReserveQueueTicker(
+    queue: List<SongItem>,
+    modifier: Modifier = Modifier
+) {
+    if (queue.isEmpty()) return
+
+    val colors = listOf(
+        Color(0xFF2DD4BF), // Teal
+        Color(0xFFFBBF24), // Amber / Gold
+        Color(0xFFF472B6), // Pink
+        Color(0xFFA78BFA), // Purple
+        Color(0xFF34D399), // Emerald
+        Color(0xFF60A5FA)  // Blue
+    )
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFF022C28).copy(alpha = 0.90f),
+        tonalElevation = 6.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+        border = BorderStroke(1.dp, Color(0xFF2DD4BF).copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "RESERVED:",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Black,
+                color = Color(0xFF2DD4BF)
+            )
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                itemsIndexed(queue) { index, song ->
+                    val color = colors[index % colors.size]
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = color.copy(alpha = 0.22f),
+                        border = BorderStroke(1.5.dp, color)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = "${index + 1}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = color
+                            )
+                            Text(
+                                text = "%06d".format(song.code),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "• ${song.displayTitle()}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.8f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
             }
         }
     }
