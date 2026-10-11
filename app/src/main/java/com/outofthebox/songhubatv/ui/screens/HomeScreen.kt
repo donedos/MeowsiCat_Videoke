@@ -48,6 +48,7 @@ data class CategoryCardData(
 fun HomeScreen(
     library: LibraryRepository.Library,
     onOpenSongs: () -> Unit,
+    onOpenPlayer: () -> Unit = onOpenSongs,
     onOpenArtists: () -> Unit = {},
     onOpenNewSongs: () -> Unit = {},
     onOpenSettings: () -> Unit,
@@ -117,7 +118,7 @@ fun HomeScreen(
         Spacer(Modifier.height(28.dp))
         CategoryRow(
             items = listOf(
-                CategoryCardData("Karaoke Player", "Select & play songs", Icons.Filled.PlayCircle, onOpenSongs),
+                CategoryCardData("Karaoke Player", "Select & play songs", Icons.Filled.PlayCircle, onOpenPlayer),
                 CategoryCardData("Song Search", "Find by title or singer", Icons.Filled.Search, onOpenSongs),
                 CategoryCardData("Remote", "Mobile remote control", Icons.Filled.SettingsRemote, { }),
                 CategoryCardData("Settings", "Content & display", Icons.Filled.Settings, onOpenSettings)

@@ -271,6 +271,11 @@ private fun LyricPlayer(
     }
 
     LaunchedEffect(song.code) {
+        if (song.code == 0) {
+            audioReady = false
+            audioNote = null
+            return@LaunchedEffect
+        }
         if (posMs == 0.0) {
             keyShift = 0
             temShift = 0
@@ -495,7 +500,7 @@ private fun LyricPlayer(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "${song.displaySinger()} • ${song.code}",
+                                text = if (song.code == 0) "000000" else "${song.displaySinger()} • ${song.code}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.White.copy(alpha = 0.7f),
                                 maxLines = 1,
@@ -523,7 +528,23 @@ private fun LyricPlayer(
                         .padding(horizontal = 32.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    if (lines.isEmpty()) {
+                    if (song.code == 0) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Select a song",
+                                style = MaterialTheme.typography.displayMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "000000",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                        }
+                    } else if (lines.isEmpty()) {
                         Text("No lyrics", style = MaterialTheme.typography.titleLarge, color = Color.White)
                     } else if (lyricStyle == LyricSettings.STYLE_KARAOKE) {
                         KaraokeStack(
@@ -696,7 +717,7 @@ private fun LyricPlayer(
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = buildString {
+                                text = if (song.code == 0) "000000" else buildString {
                                     append(song.displaySinger())
                                     if (song.style.isNotBlank()) append(" • ").append(song.style)
                                     append(" • ").append(song.code)
@@ -720,7 +741,22 @@ private fun LyricPlayer(
 
                 Spacer(Modifier.weight(1f))
 
-                if (lines.isEmpty()) {
+                if (song.code == 0) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Select a song",
+                            style = MaterialTheme.typography.displayMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "000000",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else if (lines.isEmpty()) {
                     Text("No lyrics", style = MaterialTheme.typography.titleLarge)
                 } else if (lyricStyle == LyricSettings.STYLE_KARAOKE) {
                     KaraokeStack(
@@ -855,7 +891,7 @@ private fun LyricPlayer(
             ScoreOverlay(
                 score = res.score,
                 songTitle = song.displayTitle(),
-                songSinger = song.displaySinger(),
+                songSinger = if (song.code == 0) "000000" else song.displaySinger(),
                 onSingAgain = {
                     scoreResult = null
                     engine.restart()
@@ -1325,7 +1361,7 @@ private fun karaokeProgressPx(
     val lineDuration = line.endMs - line.startMs
     if (lineDuration <= 0) return totalWidth
 
-    if (currentTick > 0L) {
+    if (currentTick > 0L && fragments.all { it.endTick > it.absTick }) {
         var tickProgressed = 0f
         for (i in fragments.indices) {
             val fragment = fragments[i]

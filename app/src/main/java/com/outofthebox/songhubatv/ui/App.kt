@@ -73,6 +73,7 @@ fun App(
                 is Screen.Home -> HomeScreen(
                     library = libraryState,
                     onOpenSongs = { screen = Screen.Songs() },
+                    onOpenPlayer = { screen = Screen.Player(SongItem.placeholder(), target) },
                     onOpenArtists = { screen = Screen.Artists },
                     onOpenNewSongs = { screen = Screen.NewSongs },
                     onOpenSettings = { screen = Screen.Settings },

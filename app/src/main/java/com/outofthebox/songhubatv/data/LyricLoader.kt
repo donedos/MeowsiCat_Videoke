@@ -20,7 +20,6 @@ object LyricLoader {
     private val lyricCache = ConcurrentHashMap<Int, Parsed>()
     private const val MAX_FILL_MS = 5000.0
     private const val ALIGN_WINDOW = 80L
-    private const val MATCH_TOLERANCE_TICKS = 120L
     private const val MIN_MELODY_RATIO = 0.5
     private const val MIN_SPAN_LEN = 40L
     private const val MIN_FINAL_GAP = 60L
@@ -34,6 +33,9 @@ object LyricLoader {
     )
 
     suspend fun load(song: SongItem): Parsed = withContext(Dispatchers.IO) {
+        if (song.code == 0) {
+            return@withContext Parsed(emptyList())
+        }
         if (lyricCache.containsKey(song.code)) {
             return@withContext lyricCache[song.code]!!
         }
@@ -279,45 +281,35 @@ object LyricLoader {
         nextAbsMs: Double?,
         nextLineStartMs: Double?
     ) {
-        val span = findMatchingNoteSpan(spans, fragment.absTick) ?: return
-
-        // Snap start to melody NoteOn
-        val startTick = span.onTick
-        val startMs = TempoUtils.tickToMs(tempoMap, startTick, ppqn)
-
-        // Snap end to melody NoteOff
-        val noteEndTick = span.offTick
-        val noteEndMs = minOf(
-            TempoUtils.tickToMs(tempoMap, noteEndTick, ppqn),
-            startMs + MAX_FILL_MS,
+        val noteEnd = findNoteEnd(spans, fragment.absTick)
+        if (noteEnd == null || noteEnd <= fragment.absTick) return
+        val endMs = minOf(
+            TempoUtils.tickToMs(tempoMap, noteEnd, ppqn),
+            fragment.absMs + MAX_FILL_MS,
             nextAbsMs ?: Double.MAX_VALUE,
             nextLineStartMs ?: Double.MAX_VALUE
         )
-        if (noteEndMs <= startMs) return
-
-        fragment.absTick = startTick
-        fragment.absMs = startMs
-        fragment.endMs = noteEndMs
-        fragment.endTick = Math.round(TempoUtils.msToTick(tempoMap, noteEndMs, ppqn))
-
-        val duration = fragment.endTick - fragment.absTick
+        if (endMs <= fragment.absMs) return
+        fragment.endMs = endMs
+        val endTick = Math.round(TempoUtils.msToTick(tempoMap, endMs, ppqn))
+        fragment.endTick = endTick
+        val duration = endTick - fragment.absTick
         if (duration > 0) {
             fragment.durationTicks = duration
             fragment.invDuration = 1.0 / duration.toDouble()
         }
     }
 
-    private fun findMatchingNoteSpan(spans: List<MidiParser.NoteSpan>, tick: Long): MidiParser.NoteSpan? {
-        var bestSpan: MidiParser.NoteSpan? = null
-        var bestDist = Long.MAX_VALUE
+    private fun findNoteEnd(spans: List<MidiParser.NoteSpan>, tick: Long): Long? {
+        var best: Long? = null
+        var bestOnTick = Long.MIN_VALUE
         for (span in spans) {
-            val dist = abs(span.onTick - tick)
-            if (dist <= MATCH_TOLERANCE_TICKS && dist < bestDist) {
-                bestDist = dist
-                bestSpan = span
+            if (span.offTick > tick && span.onTick in bestOnTick..tick) {
+                bestOnTick = span.onTick
+                best = span.offTick
             }
         }
-        return bestSpan
+        return best
     }
 
     fun midiBytes(song: SongItem): ByteArray? = try {

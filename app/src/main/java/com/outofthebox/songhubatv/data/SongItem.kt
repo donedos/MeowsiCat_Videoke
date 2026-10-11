@@ -17,9 +17,34 @@ data class SongItem(
     val mp3Offset: Long = 0,
     val mp3Length: Long = 0
 ) {
-    fun displayTitle(): String = if (title.isBlank()) "Song #$code" else title
+    fun displayTitle(): String = when {
+        code == 0 -> "Select a song"
+        title.isBlank() -> "Song #$code"
+        else -> title
+    }
 
-    fun displaySinger(): String = if (singer.isBlank()) "Unknown" else singer
+    fun displaySinger(): String = when {
+        code == 0 -> "000000"
+        singer.isBlank() -> "Unknown"
+        else -> singer
+    }
+
+    fun displayCode(): String = "%06d".format(code)
 
     fun sortableCode(): Long = if (isUser) code.toLong() else code.toLong()
+
+    companion object {
+        fun placeholder(): SongItem = SongItem(
+            code = 0,
+            title = "Select a song",
+            singer = "000000",
+            style = "",
+            language = "",
+            isUser = false,
+            isMp3 = false,
+            songFile = File(""),
+            byteOffset = 0,
+            byteLength = 0
+        )
+    }
 }
