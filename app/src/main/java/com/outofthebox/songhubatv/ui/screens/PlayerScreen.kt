@@ -263,6 +263,13 @@ private fun LyricPlayer(
 
     // Remote keypad, reservation & search state
     var codeInput by rememberSaveable { mutableStateOf("") }
+    val typedSongPreview = remember(codeInput, library.songs) {
+        if (codeInput.isBlank()) null
+        else {
+            val code = codeInput.toIntOrNull()
+            if (code != null) library.songs.find { it.code == code } else null
+        }
+    }
     var reservationQueue by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var showSearchDialog by rememberSaveable { mutableStateOf(false) }
     var showRsvDialog by rememberSaveable { mutableStateOf(false) }
@@ -596,14 +603,6 @@ private fun LyricPlayer(
                             .statusBarsPadding(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = Color.White
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = song.displayTitle(),
@@ -654,18 +653,39 @@ private fun LyricPlayer(
                     if (codeInput.isNotBlank()) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = "Code Entry",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White.copy(alpha = 0.8f)
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
                                 text = codeInput.padStart(6, '0'),
-                                style = MaterialTheme.typography.displayLarge.copy(fontSize = 52.sp),
+                                style = MaterialTheme.typography.displayLarge.copy(fontSize = 56.sp),
                                 fontWeight = FontWeight.Black,
                                 color = Color(0xFFFBBF24)
                             )
+                            Spacer(Modifier.height(8.dp))
+                            if (typedSongPreview != null) {
+                                Text(
+                                    text = typedSongPreview.displayTitle(),
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = typedSongPreview.displaySinger(),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xFF2DD4BF),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            } else {
+                                Text(
+                                    text = "Searching song code...",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.White.copy(alpha = 0.6f)
+                                )
+                            }
                         }
                     } else if (song.code == 0) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -763,13 +783,6 @@ private fun LyricPlayer(
                             .statusBarsPadding(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back"
-                            )
-                        }
-                        Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = song.displayTitle(),
@@ -806,17 +819,39 @@ private fun LyricPlayer(
                 if (codeInput.isNotBlank()) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "Code Entry",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
                             text = codeInput.padStart(6, '0'),
-                            style = MaterialTheme.typography.displayLarge.copy(fontSize = 52.sp),
+                            style = MaterialTheme.typography.displayLarge.copy(fontSize = 56.sp),
                             fontWeight = FontWeight.Black,
                             color = Color(0xFFFBBF24)
                         )
+                        Spacer(Modifier.height(8.dp))
+                        if (typedSongPreview != null) {
+                            Text(
+                                text = typedSongPreview.displayTitle(),
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text(
+                                text = typedSongPreview.displaySinger(),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF2DD4BF),
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        } else {
+                            Text(
+                                text = "Searching song code...",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                        }
                     }
                 } else if (song.code == 0) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
