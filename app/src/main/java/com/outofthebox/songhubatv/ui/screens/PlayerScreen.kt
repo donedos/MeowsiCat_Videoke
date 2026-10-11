@@ -320,24 +320,21 @@ private fun LyricPlayer(
     }
 
     LaunchedEffect(song.code) {
+        posMs = 0.0
+        posTick = 0L
         if (song.code == 0) {
             audioReady = false
             audioNote = null
             playing = false
             return@LaunchedEffect
         }
-        if (posMs == 0.0) {
-            keyShift = 0
-            temShift = 0
-            melVol = 40
-            engine.setKey(0)
-            engine.setTempo(100f)
-            engine.setMelodyVolume(40)
-        } else {
-            engine.setKey(keyShift)
-            engine.setTempo((100 + temShift * 5).toFloat())
-            engine.setMelodyVolume(melVol)
-        }
+        keyShift = 0
+        temShift = 0
+        melVol = 40
+        engine.setKey(0)
+        engine.setTempo(100f)
+        engine.setMelodyVolume(40)
+
         withContext(Dispatchers.IO) {
             val sf = SoundFontManager.getOrAutoPickSoundFont(context)
             Log.i("PlayerScreen", "SoundFont: $sf")
@@ -351,9 +348,8 @@ private fun LyricPlayer(
             if (loaded) {
                 val dur = engine.getDurationMs()
                 audioDurationMs = dur
-                if (posMs > 0.0) {
-                    engine.seekMs(posMs)
-                }
+                engine.restart()
+                engine.seekMs(0.0)
                 Log.i("PlayerScreen", "MIDI loaded: ${song.displayTitle()} via $sf, durationMs: $dur")
             } else {
                 Log.w("PlayerScreen", "MIDI unavailable: ${song.displayTitle()}")
@@ -363,17 +359,17 @@ private fun LyricPlayer(
 
     // Helper functions for playback & queue actions
     fun playNextSongInQueue() {
+        posMs = 0.0
+        posTick = 0L
+        scored = false
         if (reservationQueue.isNotEmpty()) {
             val nextSong = reservationQueue.first()
             reservationQueue = reservationQueue.drop(1)
             onSelectSong(nextSong)
-            posMs = 0.0
-            scored = false
             playing = true
             statusToast = "Now Playing: ${nextSong.displayTitle()}"
         } else {
             playing = false
-            posMs = 0.0
             onSelectSong(SongItem.placeholder())
             statusToast = "Playback Stopped — Select a Song"
         }
@@ -738,8 +734,23 @@ private fun LyricPlayer(
                             engine.stop()
                             playNextSongInQueue()
                         },
-                        onNextPress = { playNextSongInQueue() },
-                        onPrevPress = { engine.restart(); posMs = 0.0 },
+                        onNextPress = {
+                            if (reservationQueue.isNotEmpty()) {
+                                playNextSongInQueue()
+                            } else {
+                                engine.restart()
+                                engine.seekMs(0.0)
+                                posMs = 0.0
+                                posTick = 0L
+                                statusToast = "No reserved songs in queue"
+                            }
+                        },
+                        onPrevPress = {
+                            engine.restart()
+                            engine.seekMs(0.0)
+                            posMs = 0.0
+                            posTick = 0L
+                        },
                         onVocalToggle = {
                             vocalActive = !vocalActive
                             melVol = if (vocalActive) 40 else 0
@@ -896,8 +907,23 @@ private fun LyricPlayer(
                             engine.stop()
                             playNextSongInQueue()
                         },
-                        onNextPress = { playNextSongInQueue() },
-                        onPrevPress = { engine.restart(); posMs = 0.0 },
+                        onNextPress = {
+                            if (reservationQueue.isNotEmpty()) {
+                                playNextSongInQueue()
+                            } else {
+                                engine.restart()
+                                engine.seekMs(0.0)
+                                posMs = 0.0
+                                posTick = 0L
+                                statusToast = "No reserved songs in queue"
+                            }
+                        },
+                        onPrevPress = {
+                            engine.restart()
+                            engine.seekMs(0.0)
+                            posMs = 0.0
+                            posTick = 0L
+                        },
                         onVocalToggle = {
                             vocalActive = !vocalActive
                             melVol = if (vocalActive) 40 else 0
