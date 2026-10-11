@@ -8,6 +8,12 @@ import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.animateFloatAsState
@@ -264,6 +270,7 @@ private fun LyricPlayer(
 
     // Controls visibility
     var controlsVisible by rememberSaveable { mutableStateOf(true) }
+    var bgvIndex by rememberSaveable { mutableIntStateOf(0) }
 
     // Key, Tempo, Melody states
     var keyShift by rememberSaveable { mutableIntStateOf(0) }
@@ -552,6 +559,7 @@ private fun LyricPlayer(
     ) {
         BackgroundVideoPlayer(
             bgvDir = bgvDir,
+            bgvIndex = bgvIndex,
             modifier = Modifier.fillMaxSize()
         )
 
@@ -731,6 +739,7 @@ private fun LyricPlayer(
                             statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
                         },
                         onBgvToggle = {
+                            bgvIndex++
                             statusToast = "BGV Switched"
                         }
                     )
@@ -1821,31 +1830,78 @@ private fun rememberLyricFontFamily(): FontFamily {
 
 private fun String?.isNullAndBlank(): Boolean = this == null || this.isBlank()
 
+@Composable
+private fun DefaultAnimatedBackground(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "bgv")
+    val angle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(12000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "angle"
+    )
+
+    val color1 = Color(0xFF0F172A)
+    val color2 = Color(0xFF1E1B4B)
+    val color3 = Color(0xFF311B92)
+    val color4 = Color(0xFF004D40)
+
+    Box(
+        modifier = modifier
+            .background(
+                Brush.sweepGradient(
+                    listOf(color1, color2, color3, color4, color1)
+                )
+            )
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.Black.copy(alpha = 0.4f), Color.Black.copy(alpha = 0.7f))
+                )
+            )
+    )
+}
+
 @OptIn(UnstableApi::class)
 @Composable
 private fun BackgroundVideoPlayer(
-    bgvDir: File,
+    bgvDir: File?,
+    bgvIndex: Int,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val videos = remember(bgvDir) {
-        if (!bgvDir.isDirectory) emptyList()
-        else bgvDir.listFiles { _, name ->
-            val lower = name.lowercase()
-            lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".avi")
-        }?.toList() ?: emptyList()
+        if (bgvDir == null || !bgvDir.isDirectory) emptyList()
+        else {
+            val list = mutableListOf<File>()
+            fun collect(f: File) {
+                if (f.isDirectory) {
+                    f.listFiles()?.forEach { collect(it) }
+                } else if (f.isFile) {
+                    val lower = f.name.lowercase()
+                    if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".avi")) {
+                        list.add(f)
+                    }
+                }
+            }
+            collect(bgvDir)
+            list
+        }
     }
 
     if (videos.isEmpty()) {
-        Box(modifier = modifier.background(Color.Black))
+        DefaultAnimatedBackground(modifier = modifier)
         return
     }
 
-    val randomVideo = remember(videos) { videos.random() }
+    val activeVideo = remember(videos, bgvIndex) {
+        videos[Math.abs(bgvIndex) % videos.size]
+    }
 
-    val exoPlayer = remember(context, randomVideo) {
+    val exoPlayer = remember(context, activeVideo) {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(randomVideo.absolutePath))
+            setMediaItem(MediaItem.fromUri(activeVideo.absolutePath))
             repeatMode = Player.REPEAT_MODE_ONE
             volume = 0f
             prepare()
