@@ -334,39 +334,58 @@ public final class LineBuilder {
             }
             d2 = lyricLine2.endMs;
         }
-        ArrayList arrayList2 = new ArrayList();
-        Iterator it2 = arrayList.iterator();
-        while (it2.hasNext()) {
-            arrayList2.addAll(((LyricLine) it2.next()).fragments);
-        }
-        int i3 = 0;
-        while (i3 < arrayList2.size()) {
-            Fragment fragment8 = (Fragment) arrayList2.get(i3);
-            i3++;
-            Fragment fragment9 = i3 < arrayList2.size() ? (Fragment) arrayList2.get(i3) : null;
-            if (fragment9 != null) {
-                long j3 = fragment9.absTick - fragment8.absTick;
-                long j4 = i;
-                if (j3 > 4 * j4) {
-                    j3 = j4 * 2;
+        double MAX_HOLD_MS = 5000.0d;
+        for (int lineIdx = 0; lineIdx < arrayList.size(); lineIdx++) {
+            LyricLine lyricLine3 = (LyricLine) arrayList.get(lineIdx);
+            if (lyricLine3.fragments.isEmpty()) {
+                continue;
+            }
+            int fragmentCount = lyricLine3.fragments.size();
+            for (int fragmentIdx = 0; fragmentIdx < fragmentCount; fragmentIdx++) {
+                Fragment fragment8 = (Fragment) lyricLine3.fragments.get(fragmentIdx);
+                int nextIdx = fragmentIdx + 1;
+                Fragment fragment9 = nextIdx < fragmentCount
+                        ? (Fragment) lyricLine3.fragments.get(nextIdx)
+                        : null;
+                if (fragment9 != null) {
+                    long j3 = fragment9.absTick - fragment8.absTick;
+                    long j4 = i;
+                    if (j3 > 4 * j4) {
+                        j3 = j4 * 2;
+                    }
+                    fragment8.durationTicks = j3;
+                    fragment8.invDuration = j3 > 0 ? 1.0d / j3 : 0.0d;
+                    fragment8.endTick = fragment8.absTick + j3;
+                    fragment8.endMs = fragment9.absMs > fragment8.absMs
+                            ? fragment9.absMs
+                            : fragment8.absMs + 1000.0d;
+                } else {
+                    Fragment nextLineFirst = lineIdx + 1 < arrayList.size()
+                            ? (Fragment) ((LyricLine) arrayList.get(lineIdx + 1)).fragments.get(0)
+                            : null;
+                    long j3;
+                    if (nextLineFirst != null) {
+                        j3 = nextLineFirst.absTick - fragment8.absTick;
+                        if (j3 > 4L * i) {
+                            j3 = i * 2L;
+                        }
+                    } else {
+                        j3 = ((long) i) * 2;
+                    }
+                    fragment8.durationTicks = j3;
+                    fragment8.invDuration = j3 > 0 ? 1.0d / j3 : 0.0d;
+                    fragment8.endTick = fragment8.absTick + j3;
+                    double nextLineStart = lineIdx + 1 < arrayList.size()
+                            ? ((LyricLine) arrayList.get(lineIdx + 1)).startMs
+                            : fragment8.absMs + MAX_HOLD_MS;
+                    fragment8.endMs = Math.min(nextLineStart, fragment8.absMs + MAX_HOLD_MS);
+                    if (fragment8.endMs <= fragment8.absMs) {
+                        fragment8.endMs = fragment8.absMs + 1000.0d;
+                    }
                 }
-                fragment8.durationTicks = j3;
-            } else {
-                fragment8.durationTicks = ((long) i) * 2;
             }
-            fragment8.invDuration = fragment8.durationTicks > 0 ? 1.0d / fragment8.durationTicks : 0.0d;
-            fragment8.endTick = fragment8.absTick + fragment8.durationTicks;
-            if (fragment9 != null && fragment9.absTick > fragment8.absTick) {
-                fragment8.endMs = fragment8.absMs + ((fragment9.absMs - fragment8.absMs) * ((double) fragment8.durationTicks / (fragment9.absTick - fragment8.absTick)));
-            } else {
-                fragment8.endMs = fragment8.absMs + 1000.0d;
-            }
-        }
-        for (LyricLine lyricLine3 : arrayList) {
-            if (!lyricLine3.fragments.isEmpty()) {
-                lyricLine3.startMs = lyricLine3.fragments.get(0).absMs;
-                lyricLine3.endMs = lyricLine3.fragments.get(lyricLine3.fragments.size() - 1).endMs;
-            }
+            lyricLine3.startMs = ((Fragment) lyricLine3.fragments.get(0)).absMs;
+            lyricLine3.endMs = ((Fragment) lyricLine3.fragments.get(fragmentCount - 1)).endMs;
         }
         return arrayList;
     }

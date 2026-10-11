@@ -49,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -111,20 +112,6 @@ private val KaraokeHighlight = Color(0xFF4F46E5)
 
 /** Frame interval used while polling the MIDI transport so the wipe stays smooth. */
 private const val AUDIO_POLL_MS = 16L
-
-private fun midiPositionMs(
-    tempoMap: List<TempoUtils.TempoEntry>,
-    ticksPerBeat: Int,
-    engine: BassMidiEngine
-): Double {
-    if (ticksPerBeat > 0 && tempoMap.isNotEmpty()) {
-        val tick = engine.getTickPosition()
-        if (tick >= 0) {
-            return TempoUtils.tickToMs(tempoMap, tick, ticksPerBeat)
-        }
-    }
-    return engine.getPositionMs()
-}
 
 @Composable
 fun PlayerScreen(
@@ -235,6 +222,7 @@ private fun LyricPlayer(
     var audioNote by rememberSaveable { mutableStateOf<String?>(null) }
     var seeking by rememberSaveable { mutableStateOf(false) }
     var posMs by rememberSaveable { mutableDoubleStateOf(0.0) }
+    var posTick by rememberSaveable { mutableLongStateOf(0L) }
     var scored by rememberSaveable { mutableStateOf(false) }
     var audioDurationMs by rememberSaveable { mutableDoubleStateOf(0.0) }
     var scoreResult by remember { mutableStateOf<ScoreResult?>(null) }
@@ -327,7 +315,13 @@ private fun LyricPlayer(
             if (!playing) break
             if (audioReady) {
                 if (!seeking) {
-                    val ms = midiPositionMs(tempoMap, ticksPerBeat, engine)
+                    val tick = engine.getTickPosition()
+                    if (tick >= 0) posTick = tick
+                    val ms = if (tick >= 0 && ticksPerBeat > 0 && tempoMap.isNotEmpty()) {
+                        TempoUtils.tickToMs(tempoMap, tick, ticksPerBeat)
+                    } else {
+                        engine.getPositionMs()
+                    }
                     if (ms > 0.0) posMs = ms
                 }
                 val ended = engine.hasEnded() || (effectiveTotalMs > 0.0 && posMs >= effectiveTotalMs)
@@ -416,6 +410,7 @@ private fun LyricPlayer(
                             lines = lines,
                             lineIndex = lineIndex,
                             posMs = posMs,
+                            currentTick = posTick,
                             fillColor = KaraokeHighlight,
                             fontSizeSp = LyricSettings.getFontSizePortrait(context)
                         )
@@ -535,6 +530,7 @@ private fun LyricPlayer(
                             lines = lines,
                             lineIndex = lineIndex,
                             posMs = posMs,
+                            currentTick = posTick,
                             fillColor = KaraokeHighlight,
                             fontSizeSp = LyricSettings.getFontSizeLandscape(context)
                         )
@@ -731,6 +727,7 @@ private fun LyricPlayer(
                         lines = lines,
                         lineIndex = lineIndex,
                         posMs = posMs,
+                        currentTick = posTick,
                         fillColor = KaraokeHighlight,
                         fontSizeSp = LyricSettings.getFontSizePortrait(context)
                     )
@@ -1098,6 +1095,7 @@ private fun KaraokeStack(
     lines: List<LyricLine>,
     lineIndex: Int,
     posMs: Double,
+    currentTick: Long,
     fillColor: Color,
     fontSizeSp: Float
 ) {
@@ -1141,6 +1139,7 @@ private fun KaraokeStack(
                 KaraokeLine(
                     line = topLine,
                     posMs = posMs,
+                    currentTick = currentTick,
                     fillColor = fillColor,
                     baseStyle = baseStyle,
                     outlinePx = outlinePx
@@ -1164,6 +1163,7 @@ private fun KaraokeStack(
                 KaraokeLine(
                     line = bottomLine,
                     posMs = posMs,
+                    currentTick = currentTick,
                     fillColor = fillColor,
                     baseStyle = baseStyle,
                     outlinePx = outlinePx
@@ -1229,6 +1229,7 @@ private fun KaraokeUpcomingLine(
 private fun KaraokeLine(
     line: LyricLine,
     posMs: Double,
+    currentTick: Long,
     fillColor: Color,
     baseStyle: TextStyle,
     outlinePx: Float
@@ -1263,7 +1264,7 @@ private fun KaraokeLine(
             baseStyle
         }
         val strokeStyle = style.copy(drawStyle = Stroke(width = outlinePx))
-        val progressPx = karaokeProgressPx(line, posMs, fragmentWidths) * scale
+        val progressPx = karaokeProgressPx(line, posMs, fragmentWidths, currentTick) * scale
 
         Box {
             // Unfilled text: black outline behind white fill
@@ -1311,7 +1312,8 @@ private fun DimLine(text: String) {
 private fun karaokeProgressPx(
     line: LyricLine,
     posMs: Double,
-    fragmentWidths: List<Float>
+    fragmentWidths: List<Float>,
+    currentTick: Long = 0L
 ): Float {
     val fragments = line.fragments
     if (fragments.isEmpty() || fragmentWidths.size != fragments.size) return 0f
@@ -1322,6 +1324,32 @@ private fun karaokeProgressPx(
 
     val lineDuration = line.endMs - line.startMs
     if (lineDuration <= 0) return totalWidth
+
+    if (currentTick > 0L) {
+        var tickProgressed = 0f
+        for (i in fragments.indices) {
+            val fragment = fragments[i]
+            val width = fragmentWidths[i]
+
+            val startTick = fragment.absTick
+            val endTick = fragment.endTick
+            when {
+                currentTick >= endTick -> tickProgressed += width
+                currentTick >= startTick -> {
+                    val duration = endTick - startTick
+                    val ratio = if (duration > 0) {
+                        ((currentTick - startTick).toDouble() / duration).coerceIn(0.0, 1.0)
+                    } else {
+                        1.0
+                    }
+                    tickProgressed += (width * ratio).toFloat()
+                    break
+                }
+                else -> break
+            }
+        }
+        return tickProgressed.coerceIn(0f, totalWidth)
+    }
 
     var progressed = 0f
     for (i in fragments.indices) {

@@ -23,6 +23,7 @@ public final class MidiParser {
         public List<TickMsText> chordEventsTicks = new ArrayList();
         public List<TickMsText> countdownEventsTicks = new ArrayList();
         public Map<String, String> metadata = new LinkedHashMap();
+        public List<NoteSpan>[] noteRunsByChannel = new ArrayList[16];
         public boolean[] isDrumChannel = new boolean[128];
         public int[] drumMapForChannel = new int[128];
         public List<byte[]> collectedSysexBlocks = new ArrayList();
@@ -51,6 +52,16 @@ public final class MidiParser {
             this.tick = j;
             this.ms = d;
             this.text = str;
+        }
+    }
+
+    public static final class NoteSpan {
+        public final long onTick;
+        public final long offTick;
+
+        public NoteSpan(long j, long j2) {
+            this.onTick = j;
+            this.offTick = j2;
         }
     }
 
@@ -659,6 +670,7 @@ public final class MidiParser {
                         parseResult.drumMapForChannel = iArr;
                         parseResult.collectedSysexBlocks = arrayList;
                         parseResult.systemMode = i10;
+                        parseResult.noteRunsByChannel = collectNoteRuns(bArr2);
                         return parseResult;
                     }
                 }
@@ -759,6 +771,109 @@ public final class MidiParser {
             }
         }
         return dMin;
+    }
+
+    private static List<NoteSpan>[] collectNoteRuns(byte[] bArr) {
+        List<NoteSpan>[] noteRunsByChannel = new ArrayList[16];
+        if (bArr.length < 14 || bArr[0] != 77 || bArr[1] != 84 || bArr[2] != 104 || bArr[3] != 100) {
+            return noteRunsByChannel;
+        }
+        int trackOffset = (int) (MidiBytes.readBe32(bArr, 4) + 8);
+        int trackCount = MidiBytes.readBe16(bArr, 10);
+        ArrayList<int[]> onEvents = new ArrayList();
+        ArrayList<int[]> offEvents = new ArrayList();
+        for (int track = 0; track < trackCount; track++) {
+            if (trackOffset + 8 > bArr.length
+                    || bArr[trackOffset] != 77
+                    || bArr[trackOffset + 1] != 84
+                    || bArr[trackOffset + 2] != 114
+                    || bArr[trackOffset + 3] != 107) {
+                break;
+            }
+            int trackEnd = (int) (((long) trackOffset) + 8L + MidiBytes.readBe32(bArr, trackOffset + 4));
+            int index = trackOffset + 8;
+            long tick = 0;
+            int runningStatus = 0;
+            while (index < trackEnd && index < bArr.length) {
+                MidiBytes.VlqResult vlq = MidiBytes.readVlq(bArr, index);
+                index = vlq.nextIndex;
+                tick += vlq.value;
+                if (index >= trackEnd || index >= bArr.length) {
+                    break;
+                }
+                int eventByte = bArr[index] & 255;
+                if (eventByte >= 128) {
+                    runningStatus = eventByte;
+                    index++;
+                } else if (runningStatus == 0) {
+                    break;
+                } else {
+                    eventByte = runningStatus;
+                }
+                int eventType = eventByte & 240;
+                int channel = eventByte & 15;
+                if (eventByte == 255) {
+                    MidiBytes.VlqResult vlqMeta = MidiBytes.readVlq(bArr, index + 1);
+                    index = Math.min(bArr.length, vlqMeta.nextIndex + ((int) vlqMeta.value));
+                    runningStatus = 0;
+                } else if (eventByte == 240 || eventByte == 247) {
+                    MidiBytes.VlqResult vlqSysex = MidiBytes.readVlq(bArr, index);
+                    index = Math.min(bArr.length, vlqSysex.nextIndex + ((int) vlqSysex.value));
+                    runningStatus = 0;
+                } else {
+                    int data1 = index < bArr.length ? bArr[index] & 255 : 0;
+                    int data2 = index + 1 < bArr.length ? bArr[index + 1] & 255 : 0;
+                    index += (eventType == 192 || eventType == 208) ? 1 : 2;
+                    if (eventType == 144 || eventType == 128) {
+                        if (eventType == 128 || data2 == 0) {
+                            offEvents.add(new int[]{channel, data1, (int) tick});
+                        } else {
+                            onEvents.add(new int[]{channel, data1, (int) tick});
+                        }
+                    }
+                }
+            }
+            trackOffset = trackEnd;
+        }
+        List<int[]>[] onByChannelPitch = new ArrayList[16 * 128];
+        List<int[]>[] offByChannelPitch = new ArrayList[16 * 128];
+        for (int[] onEvent : onEvents) {
+            int onSlot = (onEvent[0] * 128) + onEvent[1];
+            if (onByChannelPitch[onSlot] == null) {
+                onByChannelPitch[onSlot] = new ArrayList();
+            }
+            onByChannelPitch[onSlot].add(onEvent);
+        }
+        for (int[] offEvent : offEvents) {
+            int offSlot = (offEvent[0] * 128) + offEvent[1];
+            if (offByChannelPitch[offSlot] == null) {
+                offByChannelPitch[offSlot] = new ArrayList();
+            }
+            offByChannelPitch[offSlot].add(offEvent);
+        }
+        for (int slot = 0; slot < 16 * 128; slot++) {
+            List<int[]> ons = onByChannelPitch[slot];
+            List<int[]> offs = offByChannelPitch[slot];
+            if (ons == null || offs == null) {
+                continue;
+            }
+            int offIndex = 0;
+            for (int[] onEvent : ons) {
+                while (offIndex < offs.size() && offs.get(offIndex)[2] <= onEvent[2]) {
+                    offIndex++;
+                }
+                if (offIndex >= offs.size()) {
+                    break;
+                }
+                int channel = onEvent[0];
+                if (noteRunsByChannel[channel] == null) {
+                    noteRunsByChannel[channel] = new ArrayList();
+                }
+                noteRunsByChannel[channel].add(new NoteSpan(onEvent[2], offs.get(offIndex)[2]));
+                offIndex++;
+            }
+        }
+        return noteRunsByChannel;
     }
 
     private static String scanTrackName(byte[] bArr, int i, int i2, String str) {
