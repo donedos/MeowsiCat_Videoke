@@ -8,6 +8,7 @@ import android.view.WindowManager
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -25,7 +26,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +45,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -68,6 +74,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -908,6 +915,76 @@ private fun LyricPlayer(
                     reservationQueue = emptyList()
                     statusToast = "Queue Cleared"
                 }
+            )
+        }
+
+        // Floating Draggable MeowsiCat (visible when controls/keypad are hidden)
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.BottomEnd
+        ) {
+            FloatingMeowsiCat(
+                visible = !controlsVisible,
+                onClick = { controlsVisible = true },
+                modifier = Modifier.padding(32.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun FloatingMeowsiCat(
+    visible: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "catBounce")
+    val bounce by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "bounce"
+    )
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = scaleIn() + fadeIn(),
+        exit = scaleOut() + fadeOut(),
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(offsetX.roundToInt(), (offsetY + bounce).roundToInt()) }
+                .pointerInput(Unit) {
+                    detectDragGestures { _, dragAmount ->
+                        offsetX += dragAmount.x
+                        offsetY += dragAmount.y
+                    }
+                }
+                .size(76.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        listOf(Color(0xFF2DD4BF), Color(0xFF0F3832), Color(0xFF022C28))
+                    )
+                )
+                .border(3.dp, Color(0xFFFBBF24), CircleShape)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onClick
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "🐱",
+                style = MaterialTheme.typography.headlineMedium
             )
         }
     }

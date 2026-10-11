@@ -153,7 +153,7 @@ object LyricLoader {
                     splitWordsTimed(
                         fragment,
                         words,
-                        timingSpans,
+                        guideSpans.ifEmpty { timingSpans },
                         nextLine,
                         tempoMap,
                         ppqn
@@ -292,7 +292,16 @@ object LyricLoader {
         nextAbsMs: Double?,
         nextLineStartMs: Double?
     ) {
-        val noteEnd = findNoteEnd(spans, fragment.absTick)
+        val windowStart = fragment.absTick
+        val windowEndTick = listOfNotNull(
+            nextAbsMs?.let { Math.round(TempoUtils.msToTick(tempoMap, it, ppqn)) },
+            nextLineStartMs?.let { Math.round(TempoUtils.msToTick(tempoMap, it, ppqn)) }
+        ).minOrNull() ?: windowStart + Math.round(
+            TempoUtils.msToTick(tempoMap, fragment.absMs + MAX_FILL_MS, ppqn)
+        )
+        if (windowEndTick <= windowStart) return
+        val noteEnd = findNoteEndInWindow(spans, windowStart, windowEndTick)
+            ?: findNoteEnd(spans, fragment.absTick)
         if (noteEnd == null || noteEnd <= fragment.absTick) return
         val endMs = minOf(
             TempoUtils.tickToMs(tempoMap, noteEnd, ppqn),
@@ -309,6 +318,19 @@ object LyricLoader {
             fragment.durationTicks = duration
             fragment.invDuration = 1.0 / duration.toDouble()
         }
+    }
+
+    private fun findNoteEndInWindow(
+        spans: List<MidiParser.NoteSpan>,
+        startTick: Long,
+        endTick: Long
+    ): Long? {
+        var best: Long? = null
+        for (span in spans) {
+            if (span.onTick < startTick || span.onTick >= endTick) continue
+            if (best == null || span.offTick > best) best = span.offTick
+        }
+        return best
     }
 
     private fun findNoteEnd(spans: List<MidiParser.NoteSpan>, tick: Long): Long? {
