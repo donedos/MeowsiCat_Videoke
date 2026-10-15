@@ -4,7 +4,7 @@ import android.content.Context
 import java.util.TreeMap
 
 object ScoreStore {
-    private const val PREFS = "songhub_scores"
+    private const val PREFS = "meowsicattv_scores"
 
     data class ScoreEntry(
         val code: Int,
