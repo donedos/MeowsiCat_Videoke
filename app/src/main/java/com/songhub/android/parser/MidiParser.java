@@ -24,6 +24,7 @@ public final class MidiParser {
         public List<TickMsText> countdownEventsTicks = new ArrayList();
         public Map<String, String> metadata = new LinkedHashMap();
         public List<NoteSpan>[] noteRunsByChannel = new ArrayList[16];
+        public int[] melodyChannelRank = new int[16];
         public boolean[] isDrumChannel = new boolean[128];
         public int[] drumMapForChannel = new int[128];
         public List<byte[]> collectedSysexBlocks = new ArrayList();
@@ -671,6 +672,7 @@ public final class MidiParser {
                         parseResult.collectedSysexBlocks = arrayList;
                         parseResult.systemMode = i10;
                         parseResult.noteRunsByChannel = collectNoteRuns(bArr2);
+                        parseResult.melodyChannelRank = collectMelodyChannelRank(bArr2);
                         return parseResult;
                     }
                 }
@@ -874,6 +876,103 @@ public final class MidiParser {
             }
         }
         return noteRunsByChannel;
+    }
+
+    // Many SongHub MIDI files name their lead track "Melody" or "Key<...>" (Yamaha/PSR style
+    // naming). That track carries the sung guide melody, which is what the lyric wipe should
+    // follow. Rank 2 = keyboard "Key..." track, rank 1 = "Melody" track, 0 = not melodic.
+    private static int classifyMelodyTrackName(String str) {
+        if (str == null) {
+            return 0;
+        }
+        String lower = str.trim().toLowerCase(java.util.Locale.ROOT);
+        if (lower.isEmpty()) {
+            return 0;
+        }
+        if (lower.startsWith("key")) {
+            return 2;
+        }
+        if (lower.contains("melody")) {
+            return 1;
+        }
+        return 0;
+    }
+
+    private static int[] collectMelodyChannelRank(byte[] bArr) {
+        int[] rank = new int[16];
+        if (bArr.length < 14 || bArr[0] != 77 || bArr[1] != 84 || bArr[2] != 104 || bArr[3] != 100) {
+            return rank;
+        }
+        int trackOffset = (int) (MidiBytes.readBe32(bArr, 4) + 8);
+        int trackCount = MidiBytes.readBe16(bArr, 10);
+        for (int track = 0; track < trackCount; track++) {
+            if (trackOffset + 8 > bArr.length
+                    || bArr[trackOffset] != 77
+                    || bArr[trackOffset + 1] != 84
+                    || bArr[trackOffset + 2] != 114
+                    || bArr[trackOffset + 3] != 107) {
+                break;
+            }
+            int trackEnd = (int) (((long) trackOffset) + 8L + MidiBytes.readBe32(bArr, trackOffset + 4));
+            int index = trackOffset + 8;
+            long tick = 0;
+            int runningStatus = 0;
+            String name = "";
+            boolean[] usedChannels = new boolean[16];
+            while (index < trackEnd && index < bArr.length) {
+                MidiBytes.VlqResult vlq = MidiBytes.readVlq(bArr, index);
+                index = vlq.nextIndex;
+                tick += vlq.value;
+                if (index >= trackEnd || index >= bArr.length) {
+                    break;
+                }
+                int eventByte = bArr[index] & 255;
+                if (eventByte >= 128) {
+                    runningStatus = eventByte;
+                    index++;
+                } else if (runningStatus == 0) {
+                    break;
+                } else {
+                    eventByte = runningStatus;
+                }
+                int eventType = eventByte & 240;
+                int channel = eventByte & 15;
+                if (eventByte == 255) {
+                    int metaType = index < bArr.length ? bArr[index] & 255 : 0;
+                    MidiBytes.VlqResult vlqMeta = MidiBytes.readVlq(bArr, index + 1);
+                    int payloadStart = vlqMeta.nextIndex;
+                    int payloadLen = (int) vlqMeta.value;
+                    if (metaType == 3 && name.isEmpty()) {
+                        int copyEnd = Math.min(bArr.length, payloadStart + payloadLen);
+                        if (payloadStart >= 0 && copyEnd >= payloadStart) {
+                            name = new String(Arrays.copyOfRange(bArr, payloadStart, copyEnd), java.nio.charset.StandardCharsets.ISO_8859_1);
+                        }
+                    }
+                    index = Math.min(bArr.length, payloadStart + payloadLen);
+                    runningStatus = 0;
+                } else if (eventByte == 240 || eventByte == 247) {
+                    MidiBytes.VlqResult vlqSysex = MidiBytes.readVlq(bArr, index);
+                    index = Math.min(bArr.length, vlqSysex.nextIndex + ((int) vlqSysex.value));
+                    runningStatus = 0;
+                } else {
+                    int data2 = index + 1 < bArr.length ? bArr[index + 1] & 255 : 0;
+                    index += (eventType == 192 || eventType == 208) ? 1 : 2;
+                    if (eventType == 144 && data2 > 0) {
+                        usedChannels[channel] = true;
+                    }
+                }
+            }
+            int trackRank = classifyMelodyTrackName(name);
+            if (trackRank > 0) {
+                for (int c = 0; c < 16; c++) {
+                    if (usedChannels[c] && trackRank > rank[c]) {
+                        rank[c] = trackRank;
+                    }
+                }
+            }
+            trackOffset = trackEnd;
+        }
+        return rank;
     }
 
     private static String scanTrackName(byte[] bArr, int i, int i2, String str) {

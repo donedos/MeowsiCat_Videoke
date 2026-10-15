@@ -14,7 +14,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/* JADX INFO: loaded from: classes3.dex */
 public class MegidxDatabase {
     public static final int ALIGNMENT_SIZE = 2048;
     private static final String DEFAULT_ENCODING = "ISO-8859-1";

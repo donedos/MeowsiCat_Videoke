@@ -4,13 +4,13 @@ plugins {
 }
 
 android {
-    namespace = "com.outofthebox.songhubatv"
+    namespace = "com.outofthebox.meowsicattv"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.outofthebox.songhubatv"
+        applicationId = "com.outofthebox.meowsicattv"
         minSdk = 26
         targetSdk = 37
         versionCode = 1
@@ -40,7 +40,8 @@ android {
 }
 
 dependencies {
-    implementation("androidx.multidex:multidex:2.0.1")
+    implementation(libs.androidx.multidex)
+    implementation(libs.androidx.tv.material.v100)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
@@ -53,6 +54,7 @@ dependencies {
     implementation(libs.androidx.tv.foundation)
     implementation(libs.androidx.tv.material)
     implementation(libs.coil.compose)
+    implementation(libs.core)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
     testImplementation(libs.junit)

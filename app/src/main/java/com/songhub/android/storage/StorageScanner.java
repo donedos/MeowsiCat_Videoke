@@ -21,7 +21,7 @@ public final class StorageScanner {
     public static final String BGV_SUBFOLDER = "bgv";
     public static final String IDX_SUBFOLDER = "idx";
     private static final Set<String> IGNORED_MOUNT_NAMES = new HashSet(Arrays.asList("self", "emulated", "runtime", "appfuse", "expand", "user", "media_rw", "obb", "asec", "secure", "vendor", "knox", "tmp", "sdcard", "cd-rom", "cdrom", "rescue", "androidwritable", "installer", "pass_through", "user_de", "vendor_de", "apex", "product", "system", "mirror", "f2fs", "ext4", "vold", "data"));
-    public static final String MGOK_FOLDER = "SongHub";
+    public static final String MGOK_FOLDER = "MeowsiCat";
     public static final String MP3S_SUBFOLDER = "mp3s";
     public static final String RECORDS_SUBFOLDER = "records";
     public static final String SFX_SUBFOLDER = "sfx";

@@ -15,6 +15,7 @@ public class AudioSettings {
     public static final String KEY_EQ_GAINS = "eq_gains_10band";
     public static final String KEY_EXPERIMENTAL_CHORUS = "experimental_chorus_mp3";
     public static final String KEY_MELODY_CHANNEL = "melody_channel";
+    public static final String KEY_WIPE_MELODY_CHANNEL = "wipe_melody_channel";
     public static final String KEY_MP3_VOLUME = "mp3_master_volume";
     public static final String KEY_MPX_MODE = "mpx_mode";
     public static final String KEY_POLYPHONY = "midi_polyphony";
@@ -97,6 +98,17 @@ public class AudioSettings {
 
     public static void setMelodyChannel(Context context, int i) {
         getPrefs(context).edit().putInt(KEY_MELODY_CHANNEL, i).apply();
+    }
+
+    /**
+     * MIDI channel (1-16) that drives the karaoke lyric wipe, or 0 for automatic detection.
+     */
+    public static int getWipeMelodyChannel(Context context) {
+        return getPrefs(context).getInt(KEY_WIPE_MELODY_CHANNEL, 0);
+    }
+
+    public static void setWipeMelodyChannel(Context context, int i) {
+        getPrefs(context).edit().putInt(KEY_WIPE_MELODY_CHANNEL, i).apply();
     }
 
     public static boolean isExperimentalChorusEnabled(Context context) {

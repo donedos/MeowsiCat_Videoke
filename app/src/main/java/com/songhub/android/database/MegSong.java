@@ -1,6 +1,5 @@
 package com.songhub.android.database;
 
-/* JADX INFO: loaded from: classes3.dex */
 public class MegSong {
     public int code;
     public boolean isMp3;

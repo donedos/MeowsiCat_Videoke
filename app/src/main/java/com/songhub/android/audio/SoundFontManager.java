@@ -12,10 +12,9 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-/* JADX INFO: loaded from: classes3.dex */
 public final class SoundFontManager {
     private static final String KEY_SELECTED_SF2_PATH = "selected_sf2_path";
-    private static final String PREFS_NAME = "songhub_settings";
+    private static final String PREFS_NAME = "meowsicattv_settings";
 
     private SoundFontManager() {
     }

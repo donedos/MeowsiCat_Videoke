@@ -5,7 +5,6 @@ import com.songhub.android.song.SongLibrary;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 
-/* JADX INFO: loaded from: classes3.dex */
 public final class MegmidReader {
     private MegmidReader() {
     }

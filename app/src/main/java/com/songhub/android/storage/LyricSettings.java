@@ -113,7 +113,7 @@ public final class LyricSettings {
     }
 
     public static int getFontType(Context context) {
-        return prefs(context).getInt(KEY_FONT_TYPE, 13);
+        return prefs(context).getInt(KEY_FONT_TYPE, 10);
     }
 
     public static void setCustomFontPath(Context context, String str) {
@@ -169,7 +169,15 @@ public final class LyricSettings {
     }
 
     public static int getLyricStyle(Context context) {
-        return prefs(context).getInt(KEY_LYRIC_STYLE, STYLE_MODERN);
+        return prefs(context).getInt(KEY_LYRIC_STYLE, STYLE_KARAOKE);
+    }
+
+    public static void setMaxLyricLines(Context context, int lines) {
+        prefs(context).edit().putInt("lyric_max_lines", lines).apply();
+    }
+
+    public static int getMaxLyricLines(Context context) {
+        return prefs(context).getInt("lyric_max_lines", 2);
     }
 
     public static void setCountdownStyle(Context context, int i) {
@@ -204,6 +212,18 @@ public final class LyricSettings {
 
     public static float getCountDownImageSize(Context context) {
         return context.getResources().getConfiguration().orientation == 2 ? getCountDownImageSizeLandscape(context) : getCountDownImageSizePortrait(context);
+    }
+
+    public static final int PLACEMENT_CENTER = 0;
+    public static final int PLACEMENT_BOTTOM = 1;
+    private static final String KEY_LYRIC_PLACEMENT = "lyric_placement_landscape";
+
+    public static void setLyricPlacement(Context context, int placement) {
+        prefs(context).edit().putInt(KEY_LYRIC_PLACEMENT, placement).apply();
+    }
+
+    public static int getLyricPlacement(Context context) {
+        return prefs(context).getInt(KEY_LYRIC_PLACEMENT, PLACEMENT_CENTER);
     }
 
     private static SharedPreferences prefs(Context context) {
