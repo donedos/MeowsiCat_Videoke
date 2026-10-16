@@ -1,23 +1,17 @@
-# SongHubATV
+# MeowsiCatTV
 
-**SongHubATV** is a karaoke player for **Android TV** that reads and plays *SongHub* content
-directly from a shared content folder on your device. Built with **Jetpack Compose** and **Kotlin**,
-it's optimized for remote control / D-pad navigation (Leanback) and also supports Picture-in-Picture
-playback.
+**MeowsiCatTV** is a feature-rich karaoke player for **Android TV** and Android devices that reads and plays *MeowsiCat / SongHub* content directly from a shared content folder on your device. Built with **Jetpack Compose** and **Kotlin**, it is optimized for remote control / D-pad navigation and includes a mobile web remote server, QR code discovery, reservation queue management, and Picture-in-Picture support.
 
 ## Features
 
-- 🎤 **Local SongHub library** — scans a `SongHub` content folder (default
-  `/storage/emulated/0/SongHub`) and indexes songs, artists, styles, and languages.
-- 📀 **Browsing** — Home, Songs, Artists, and New Songs screens with D-pad focus navigation.
-- ▶️ **Playback** — plays karaoke MIDI + MP3 tracks via **Media3 (ExoPlayer)**, with a built-in
-  MIDI bass engine and selectable **SoundFonts** for MIDI output.
-- 📜 **Lyrics & scoring** — real-time lyric display and song scoring with a live score overlay.
-- 🏆 **Rankings** — persists your scores and shows a per-song rankings board.
-- 🎛️ **Settings** — configure the library folder, audio, background, lyric, and scoring options,
-  and pick the active SoundFont.
-- 📺 **TV-first** — Leanback launcher entry point, D-pad / remote friendly, plus
-  Picture-in-Picture support so a song keeps playing in a small window.
+- 🎤 **Local Library & Swipe-to-Refresh** — scans the content folder (default `/storage/emulated/0/MeowsiCat`) and indexes songs, artists, styles, and languages. Swipe down on the Main menu or Song Search to instantly rescan and load newly added files (`song/`, `songs/`, `bgv/`, `bgphoto/`).
+- 🌐 **Web App Remote & QR Search** — Scan the on-screen QR code on your phone to open a mobile web remote and search songs, reserve items, view the reservation queue, and control playback. Includes a foreground notification with a **Stop** action button.
+- 📀 **Browsing & Search** — Home, Songs, Artists, New Songs, Favorites, and Playlist screens with smooth D-pad focus navigation and vertical song lists.
+- ▶️ **Playback & Transport** — plays karaoke MIDI + MP3 tracks via **Media3 (ExoPlayer)**, with an advanced MIDI engine, selectable **SoundFonts (.sf2)**, and Play/Pause synchronization.
+- 📜 **Lyrics & Positioning** — real-time lyric highlighting, custom styling, and user-configurable **Lyric Placement** (Center or Bottom) in Settings for TV and landscape displays.
+- 🎨 **Backgrounds** — support for `.mp4` background videos (`bgv/`) or static background photos (`bgphoto/`) with BGV button cycling.
+- 🏆 **Scoring & Rankings** — microphone or random song scoring with a smooth transition delay before the score overlay appears, plus persistent rankings.
+- 📺 **TV-first & PiP** — D-pad / remote friendly, with intelligent Picture-in-Picture support (activates when on the Player Screen or actively playing).
 
 ## Requirements
 
@@ -29,24 +23,24 @@ playback.
 | Android Gradle Plugin | 9.4.1 |
 | Java compatibility | 11 |
 
-On **Android 11+**, the app requests *"All files access"* (`MANAGE_EXTERNAL_STORAGE`) so it can read
-your SongHub content folders outside of scoped storage. Grant this permission when prompted.
+On **Android 11+**, the app requests *"All files access"* (`MANAGE_EXTERNAL_STORAGE`) so it can read content folders outside of scoped storage. Grant this permission when prompted.
 
 ## Content Layout
 
-Place your SongHub content in a `SongHub` folder on the device. The app expects:
+Place your content in a `MeowsiCat` (or `SongHub`) folder on the device. The app expects:
 
 ```
-SongHub/
-├── (song / MIDI / MP3 content files)
-├── sound/        # optional .sf2 SoundFonts used for MIDI playback
-└── ...           # index + user content scanned at runtime
+MeowsiCat/
+├── song/ or songs/    # MIDI (.mid), .kar, and MP3 files dropped by user
+├── bgv/               # Background videos (.mp4, .mkv, .avi)
+├── bgphoto/           # Static background photos (.jpg, .png)
+├── sound/             # Optional .sf2 SoundFonts used for MIDI playback
+└── idx/               # shubidx / shubblob catalog indexes
 ```
 
-The active root path can be changed in **Settings**. If the catalog is missing, the app reports
-where to put the content so it can be found again.
+The active root path can be changed in **Settings**.
 
-## Building
+## Building & Versioning
 
 ```bash
 # Build a debug APK
@@ -56,30 +50,9 @@ where to put the content so it can be found again.
 ./gradlew :app:testDebugUnitTest
 ```
 
-Or open the project in **Android Studio**, then run the `app` configuration on an Android TV
-emulator or a TV device.
+### Version v0.4.1
 
-### Project layout
-
-```
-app/
-├── src/main/java/com/outofthebox/songhubatv/
-│   ├── MainActivity.kt          # entry point, PiP + permission handling
-│   ├── data/                    # library repo, lyric loading, score store, model
-│   └── ui/
-│       ├── App.kt               # navigation + state
-│       ├── screens/             # Home, Songs, Artists, NewSongs, Player, Settings, Rankings
-│       ├── components/          # shared TV-friendly UI components
-│       └── theme/               # Compose theme
-└── src/main/java/com/songhub/android/   # bundled karaoke engine (MIDI, parser, scoring)
-```
-
-## Tech Stack
-
-- **Jetpack Compose** + Material3, with `androidx.tv` (Leanback) foundation/material libraries
-- **Media3** (ExoPlayer) for audio playback
-- **Coil** for image loading
-- Bundled `com.songhub.android` karaoke engine for MIDI parsing, lyric building, and scoring
+This release includes enhanced web remote integration, notification remote control with stop broadcast, swipe-down auto-scanning, customizable lyric placement, and polished TV d-pad navigation.
 
 ## License
 
