@@ -36,8 +36,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material3.Button
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.style.TextAlign
 import android.app.UiModeManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -231,9 +237,11 @@ fun FocusableCard(
             ),
             label = "lift"
         )
+        val primaryColor = MaterialTheme.colorScheme.primary
+        val primaryContainer = MaterialTheme.colorScheme.primaryContainer
         val bg by animateColorAsState(
             targetValue = if (focused) {
-                MaterialTheme.colorScheme.primary
+                primaryContainer
             } else {
                 MaterialTheme.colorScheme.surfaceVariant
             },
@@ -250,13 +258,13 @@ fun FocusableCard(
                 .shadow(
                     elevation = 4.dp + (16f * lift).dp,
                     shape = shape,
-                    spotColor = Color(0xFF2DD4BF),
-                    ambientColor = Color(0xFF2DD4BF)
+                    spotColor = primaryColor,
+                    ambientColor = primaryColor
                 )
                 .clip(shape)
                 .background(bg)
                 .border(
-                    width = if (focused) 4.dp else 1.dp,
+                    width = if (focused) 3.5.dp else 1.dp,
                     color = if (focused) Color.White else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
                     shape = shape
                 )
@@ -292,6 +300,8 @@ fun NetflixCard(
     content: @Composable () -> Unit
 ) {
     if (rememberIsTvDevice()) {
+        val primaryColor = MaterialTheme.colorScheme.primary
+        val primaryContainer = MaterialTheme.colorScheme.primaryContainer
         Card(
             onClick = onClick,
             modifier = modifier,
@@ -299,7 +309,7 @@ fun NetflixCard(
             scale = CardDefaults.scale(focusedScale = 1.08f),
             border = CardDefaults.border(
                 focusedBorder = Border(
-                    border = BorderStroke(3.dp, Color.White),
+                    border = BorderStroke(3.5.dp, Color.White),
                     shape = shape
                 ),
                 border = Border(
@@ -309,13 +319,13 @@ fun NetflixCard(
             ),
             glow = CardDefaults.glow(
                 focusedGlow = Glow(
-                    elevationColor = Color(0xFF2DD4BF).copy(alpha = 0.4f),
-                    elevation = 10.dp
+                    elevationColor = primaryColor.copy(alpha = 0.6f),
+                    elevation = 14.dp
                 )
             ),
             colors = CardDefaults.colors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant
+                focusedContainerColor = primaryContainer
             )
         ) {
             Column {

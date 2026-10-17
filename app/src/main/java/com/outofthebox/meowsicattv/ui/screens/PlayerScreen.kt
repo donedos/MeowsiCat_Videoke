@@ -12,6 +12,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -38,6 +39,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
@@ -216,7 +218,7 @@ fun PlayerScreen(
     initialQueue: List<SongItem> = emptyList(),
     onBack: () -> Unit,
     onHome: () -> Unit = onBack,
-    library: LibraryRepository.Library = LibraryRepository.Library(emptyList(), emptyList(), emptyList(), emptyList(), LibraryRepository.defaultRoot()),
+    library: LibraryRepository.Library = LibraryRepository.Library(emptyList(), emptyList(), emptyList(), emptyList(), File("")),
     libraryRoot: File = library.root,
     isInPipMode: Boolean = false,
     isPipSupported: Boolean = false,
@@ -961,6 +963,7 @@ private fun LyricPlayer(
         return
     }
 
+    val isAnyDialogActive = showSearchDialog || showRsvDialog || showQrDialog || showFavDialog
     val focusRequester = remember { FocusRequester() }
     val searchFocusRequester = remember { FocusRequester() }
     val digitFocusRequesters = remember { ('0'..'9').associateWith { FocusRequester() } }
@@ -978,6 +981,9 @@ private fun LyricPlayer(
             .onKeyEvent { event ->
                 if (event.type == KeyEventType.KeyDown) {
                     val nativeKey = event.nativeKeyEvent.keyCode
+                    if (isAnyDialogActive && nativeKey != KeyEvent.KEYCODE_BACK) {
+                        return@onKeyEvent false
+                    }
                     val digit = when (nativeKey) {
                         KeyEvent.KEYCODE_0, KeyEvent.KEYCODE_NUMPAD_0 -> '0'
                         KeyEvent.KEYCODE_1, KeyEvent.KEYCODE_NUMPAD_1 -> '1'
@@ -1018,7 +1024,12 @@ private fun LyricPlayer(
                             false
                         }
                     } else if (nativeKey == KeyEvent.KEYCODE_BACK) {
-                        if (codeInput.isNotEmpty()) {
+                        if (isAnyDialogActive) {
+                            if (showSearchDialog) showSearchDialog = false
+                            else if (showRsvDialog) showRsvDialog = false
+                            else if (showQrDialog) showQrDialog = false
+                            else if (showFavDialog) showFavDialog = false
+                        } else if (codeInput.isNotEmpty()) {
                             codeInput = ""
                         } else if (controlsVisible) {
                             controlsVisible = false
@@ -1047,7 +1058,9 @@ private fun LyricPlayer(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = {
-                        controlsVisible = !controlsVisible
+                        if (!isAnyDialogActive) {
+                            controlsVisible = !controlsVisible
+                        }
                     }
                 )
             }
@@ -1185,7 +1198,7 @@ private fun LyricPlayer(
                 Spacer(Modifier.height(8.dp))
 
                 AnimatedVisibility(
-                    visible = controlsVisible,
+                    visible = controlsVisible && !isAnyDialogActive,
                     enter = fadeIn(),
                     exit = fadeOut()
                 ) {
@@ -1214,7 +1227,10 @@ private fun LyricPlayer(
                             showSearchDialog = true
                             controlsVisible = false
                         },
-                        onRsvListPress = { showRsvDialog = true },
+                        onRsvListPress = {
+                            showRsvDialog = true
+                            controlsVisible = false
+                        },
                         onPlayPress = { handlePlayPress() },
                         onStopPress = { handleStopPress() },
                         onNextPress = {
@@ -1262,7 +1278,7 @@ private fun LyricPlayer(
         // lower right region and never covers the lyrics on the left or top right.
         if (isLandscape) {
             AnimatedVisibility(
-                visible = controlsVisible,
+                visible = controlsVisible && !isAnyDialogActive,
                 enter = fadeIn() + slideInHorizontally { fullWidth -> fullWidth },
                 exit = fadeOut() + slideOutHorizontally { fullWidth -> fullWidth },
                 modifier = Modifier.align(Alignment.BottomEnd)
@@ -1292,7 +1308,10 @@ private fun LyricPlayer(
                         showSearchDialog = true
                         controlsVisible = false
                     },
-                    onRsvListPress = { showRsvDialog = true },
+                    onRsvListPress = {
+                        showRsvDialog = true
+                        controlsVisible = false
+                    },
                     onPlayPress = { handlePlayPress() },
                     onStopPress = { handleStopPress() },
                     onNextPress = {
@@ -1329,6 +1348,7 @@ private fun LyricPlayer(
                     digitFocusRequesters = digitFocusRequesters,
                     shape = RoundedCornerShape(20.dp),
                     modifier = Modifier
+                        .focusProperties { canFocus = !(showSearchDialog || showRsvDialog || showQrDialog || showFavDialog) }
                         .width(CustomKeyboardWidth)
                         .padding(end = 12.dp, bottom = 12.dp)
                 )
@@ -2157,12 +2177,56 @@ private fun KeypadButton(
 }
 
 @Composable
+private fun DialogActionButton(
+    onClick: () -> Unit,
+    defaultBg: Color,
+    focusedBg: Color = MaterialTheme.colorScheme.primary,
+    focusedBorderColor: Color = Color.White,
+    modifier: Modifier = Modifier.size(30.dp),
+    shape: Shape = RoundedCornerShape(8.dp),
+    content: @Composable () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val bg by animateColorAsState(
+        targetValue = if (isFocused) focusedBg else defaultBg,
+        label = "actionBg"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.15f else 1f,
+        label = "actionScale"
+    )
+
+    Box(
+        modifier = modifier
+            .onFocusChanged { isFocused = it.isFocused }
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .shadow(if (isFocused) 8.dp else 0.dp, shape)
+            .clip(shape)
+            .background(bg)
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = if (isFocused) focusedBorderColor else Color.Transparent,
+                shape = shape
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
+}
+
+@Composable
 private fun QuickSearchDialog(
     songs: List<SongItem>,
     onDismiss: () -> Unit,
     onPlaySong: (SongItem) -> Unit,
     onReserveSong: (SongItem) -> Unit
 ) {
+    BackHandler(onBack = onDismiss)
     val context = LocalContext.current
     var query by remember { mutableStateOf("") }
     val searchFocusRequester = remember { FocusRequester() }
@@ -2229,12 +2293,12 @@ private fun QuickSearchDialog(
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                    IconButton(
+                    DialogActionButton(
                         onClick = onDismiss,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.15f))
+                        defaultBg = Color.White.copy(alpha = 0.15f),
+                        focusedBg = Color(0xFFEF4444),
+                        modifier = Modifier.size(36.dp),
+                        shape = CircleShape
                     ) {
                         Icon(Icons.Filled.Clear, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
@@ -2297,15 +2361,13 @@ private fun QuickSearchDialog(
                                 var isFav by remember(song.code) {
                                     mutableStateOf(FavoritesStore.isFavorite(context, song.code))
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFF334155))
-                                        .clickable {
-                                            isFav = FavoritesStore.toggleFavorite(context, song.code)
-                                        },
-                                    contentAlignment = Alignment.Center
+                                DialogActionButton(
+                                    onClick = {
+                                        isFav = FavoritesStore.toggleFavorite(context, song.code)
+                                    },
+                                    defaultBg = Color(0xFF334155),
+                                    focusedBg = Color(0xFFEC4899),
+                                    modifier = Modifier.size(30.dp)
                                 ) {
                                     Icon(
                                         imageVector = if (isFav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -2316,13 +2378,11 @@ private fun QuickSearchDialog(
                                 }
 
                                 // "P" Play Button
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFF059669))
-                                        .clickable { onPlaySong(song) },
-                                    contentAlignment = Alignment.Center
+                                DialogActionButton(
+                                    onClick = { onPlaySong(song) },
+                                    defaultBg = Color(0xFF059669),
+                                    focusedBg = Color(0xFF10B981),
+                                    modifier = Modifier.size(30.dp)
                                 ) {
                                     Text(
                                         text = "P",
@@ -2333,13 +2393,11 @@ private fun QuickSearchDialog(
                                 }
 
                                 // "R" Reserve Button
-                                Box(
-                                    modifier = Modifier
-                                        .size(28.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0xFF2563EB))
-                                        .clickable { onReserveSong(song) },
-                                    contentAlignment = Alignment.Center
+                                DialogActionButton(
+                                    onClick = { onReserveSong(song) },
+                                    defaultBg = Color(0xFF2563EB),
+                                    focusedBg = Color(0xFF3B82F6),
+                                    modifier = Modifier.size(30.dp)
                                 ) {
                                     Text(
                                         text = "R",
@@ -2366,9 +2424,18 @@ private fun ReservationListDialog(
     onRemove: (SongItem) -> Unit,
     onClearQueue: () -> Unit
 ) {
+    BackHandler(onBack = onDismiss)
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isTv = rememberIsTvDevice()
     val isRightPanel = isLandscape || isTv
+
+    val closeFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(100L)
+        try {
+            closeFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
 
     Box(
         modifier = Modifier
@@ -2418,12 +2485,14 @@ private fun ReservationListDialog(
                         modifier = Modifier.weight(1f)
                     )
 
-                    IconButton(
+                    DialogActionButton(
                         onClick = onDismiss,
+                        defaultBg = Color.White.copy(alpha = 0.15f),
+                        focusedBg = Color(0xFFEF4444),
                         modifier = Modifier
                             .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.15f))
+                            .focusRequester(closeFocusRequester),
+                        shape = CircleShape
                     ) {
                         Icon(Icons.Filled.Clear, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
@@ -2595,6 +2664,14 @@ private fun FavoritesPanelContent(
     onRemoveFavorite: (SongItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val closeFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        delay(100L)
+        try {
+            closeFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
+
     Column(
         modifier = modifier.padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
@@ -2611,12 +2688,14 @@ private fun FavoritesPanelContent(
                 modifier = Modifier.weight(1f)
             )
 
-            IconButton(
+            DialogActionButton(
                 onClick = onDismiss,
+                defaultBg = Color.White.copy(alpha = 0.15f),
+                focusedBg = Color(0xFFEF4444),
                 modifier = Modifier
                     .size(36.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.15f))
+                    .focusRequester(closeFocusRequester),
+                shape = CircleShape
             ) {
                 Icon(Icons.Filled.Clear, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(20.dp))
             }
@@ -2680,13 +2759,11 @@ private fun FavoritesPanelContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             // Heart: remove this song from favorites
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFF334155))
-                                    .clickable { onRemoveFavorite(song) },
-                                contentAlignment = Alignment.Center
+                            DialogActionButton(
+                                onClick = { onRemoveFavorite(song) },
+                                defaultBg = Color(0xFF334155),
+                                focusedBg = Color(0xFFEC4899),
+                                modifier = Modifier.size(30.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.Favorite,
@@ -2697,13 +2774,11 @@ private fun FavoritesPanelContent(
                             }
 
                             // "P" Play now
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFF059669))
-                                    .clickable { onPlayNow(song) },
-                                contentAlignment = Alignment.Center
+                            DialogActionButton(
+                                onClick = { onPlayNow(song) },
+                                defaultBg = Color(0xFF059669),
+                                focusedBg = Color(0xFF10B981),
+                                modifier = Modifier.size(30.dp)
                             ) {
                                 Text(
                                     text = "P",
@@ -2714,13 +2789,11 @@ private fun FavoritesPanelContent(
                             }
 
                             // "R" Reserve
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFF2563EB))
-                                    .clickable { onReserveSong(song) },
-                                contentAlignment = Alignment.Center
+                            DialogActionButton(
+                                onClick = { onReserveSong(song) },
+                                defaultBg = Color(0xFF2563EB),
+                                focusedBg = Color(0xFF3B82F6),
+                                modifier = Modifier.size(30.dp)
                             ) {
                                 Text(
                                     text = "R",
@@ -2750,6 +2823,7 @@ private fun FavoritesDialog(
     onReserveSong: (SongItem) -> Unit,
     onRemoveFavorite: (SongItem) -> Unit
 ) {
+    BackHandler(onBack = onDismiss)
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isTv = rememberIsTvDevice()
     val isRightPanel = isLandscape || isTv
@@ -3426,6 +3500,7 @@ private fun String?.isNullAndBlank(): Boolean = this == null || this.isBlank()
 private fun QrCodeDialog(
     onDismiss: () -> Unit
 ) {
+    BackHandler(onBack = onDismiss)
     val context = LocalContext.current
     val ip = remember(context) { getLocalIpAddress(context) }
     val port = remember(context) { BehaviorSettings.getWebPort(context) }
@@ -3624,7 +3699,7 @@ private fun BackgroundVideoPlayer(
 ) {
     val context = LocalContext.current
     val bgvMode = remember(context) { BgvSettings.getMode(context) }
-    val libraryRoot = remember(bgvDir) { bgvDir?.parentFile ?: File(LibraryRepository.DEFAULT_ROOT) }
+    val libraryRoot = remember(bgvDir, context) { bgvDir?.parentFile ?: LibraryRepository.defaultRoot(context) }
 
     if (bgvMode == BgvSettings.MODE_STATIC_PHOTO) {
         val staticPath = remember(context) { BgvSettings.getStaticPhotoPath(context) }

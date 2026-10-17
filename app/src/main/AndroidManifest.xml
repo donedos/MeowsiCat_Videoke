@@ -9,10 +9,6 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
-    <uses-permission
-        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
-        android:usesPermissionFlags="neverForLocation"
-        tools:ignore="ScopedStorage" />
 
     <uses-feature
         android:name="android.software.leanback"
@@ -58,6 +54,13 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the embedded remote-control web server reachable while the app is backgrounded" />
         </service>
+
+        <!-- Test ads ca-app-pub-3940256099942544~3347511713 -->
+        <!-- Live ads ca-app-pub-7345017485695850~9212431528 -->
+
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3940256099942544~3347511713"/>
     </application>
 
 </manifest>

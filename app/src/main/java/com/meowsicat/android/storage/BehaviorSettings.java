@@ -86,6 +86,16 @@ public final class BehaviorSettings {
         return prefs(context).getInt(KEY_APP_THEME, THEME_DEFAULT);
     }
 
+    private static final String KEY_WELCOME_SHOWN = "welcome_shown";
+
+    public static void setWelcomeShown(Context context, boolean shown) {
+        prefs(context).edit().putBoolean(KEY_WELCOME_SHOWN, shown).apply();
+    }
+
+    public static boolean isWelcomeShown(Context context) {
+        return prefs(context).getBoolean(KEY_WELCOME_SHOWN, false);
+    }
+
     private static SharedPreferences prefs(Context context) {
         return context.getSharedPreferences(PREF_NAME, 0);
     }

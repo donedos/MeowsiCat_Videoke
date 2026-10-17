@@ -11,13 +11,15 @@ import org.json.JSONObject
 
 object LibraryRepository {
     private const val TAG = "LibraryRepository"
-    const val DEFAULT_ROOT = "/storage/emulated/0/MeowsiCat"
+    fun defaultRoot(context: Context): File {
+        return context.getExternalFilesDir("MeowsiCat") ?: File(context.filesDir, "MeowsiCat")
+    }
 
     private const val PREFS_NAME = "content_settings"
     private const val KEY_CONTENT_ROOT = "content_root"
 
     /** Folder(s) inside the MeowsiCat root where users drop their own MIDI/KAR files. */
-    private val USER_SUBFOLDERS = listOf("song", "songs", "bgv", "bgphoto")
+    private val USER_SUBFOLDERS = listOf("idx", "song", "songs", "sound", "bgv", "bgphoto", "videos")
     private val USER_SONG_EXTENSIONS = setOf("mid", "midi", "kar", "mp3")
     private val USER_CODE_BASE = 100000
     private val TITLE_SINGER_REGEX = Regex("^(.+?)\\s*-\\s*(.+)$")
@@ -25,12 +27,12 @@ object LibraryRepository {
 
     private val libraryCache = ConcurrentHashMap<String, Library>()
 
-    /** Returns the user-chosen content root, or [DEFAULT_ROOT] if none was saved. */
+    /** Returns the user-chosen content root, or app-specific default root if none was saved. */
     fun getSavedRoot(context: Context): String =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_CONTENT_ROOT, null)
             ?.takeIf { it.isNotBlank() }
-            ?: DEFAULT_ROOT
+            ?: defaultRoot(context).absolutePath
 
     /** Persists the content root so it survives app restarts. */
     fun setSavedRoot(context: Context, path: String) {
@@ -53,8 +55,6 @@ object LibraryRepository {
     }
 
     data class ArtistCount(val name: String, val count: Int)
-
-    fun defaultRoot(): File = File(DEFAULT_ROOT)
 
     fun load(root: File, forceReload: Boolean = false): Library {
         val path = root.absolutePath

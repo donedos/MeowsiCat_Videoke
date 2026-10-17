@@ -17,11 +17,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.Surface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
@@ -338,6 +348,49 @@ private fun SortToggle(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
+private fun ListItemActionButton(
+    onClick: () -> Unit,
+    defaultBg: Color = Color.Transparent,
+    focusedBg: Color = MaterialTheme.colorScheme.primary,
+    focusedBorderColor: Color = Color.White,
+    modifier: Modifier = Modifier.size(34.dp),
+    shape: Shape = CircleShape,
+    content: @Composable () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val bg by animateColorAsState(
+        targetValue = if (isFocused) focusedBg else defaultBg,
+        label = "itemActionBg"
+    )
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.18f else 1f,
+        label = "itemActionScale"
+    )
+
+    Box(
+        modifier = modifier
+            .onFocusChanged { isFocused = it.isFocused }
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .shadow(if (isFocused) 8.dp else 0.dp, shape)
+            .clip(shape)
+            .background(bg)
+            .border(
+                width = if (isFocused) 2.dp else 0.dp,
+                color = if (isFocused) focusedBorderColor else Color.Transparent,
+                shape = shape
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        content()
+    }
+}
+
+@Composable
 private fun SongListItem(song: SongItem, onClick: () -> Unit) {
     val context = LocalContext.current
     var isFav by remember(song.code) {
@@ -391,11 +444,13 @@ private fun SongListItem(song: SongItem, onClick: () -> Unit) {
                 Spacer(Modifier.width(8.dp))
             }
 
-            IconButton(
+            ListItemActionButton(
                 onClick = {
                     isFav = FavoritesStore.toggleFavorite(context, song.code)
                 },
-                modifier = Modifier.size(36.dp)
+                defaultBg = if (isFav) Color(0xFFF472B6).copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
+                focusedBg = Color(0xFFEC4899),
+                modifier = Modifier.size(34.dp)
             ) {
                 Icon(
                     imageVector = if (isFav) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
@@ -407,19 +462,18 @@ private fun SongListItem(song: SongItem, onClick: () -> Unit) {
 
             Spacer(Modifier.width(8.dp))
 
-            Surface(
-                shape = CircleShape,
-                color = Color(0xFF059669),
-                modifier = Modifier.size(32.dp)
+            ListItemActionButton(
+                onClick = onClick,
+                defaultBg = Color(0xFF059669),
+                focusedBg = Color(0xFF10B981),
+                modifier = Modifier.size(34.dp)
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Filled.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                Icon(
+                    Icons.Filled.PlayArrow,
+                    contentDescription = "Play",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }

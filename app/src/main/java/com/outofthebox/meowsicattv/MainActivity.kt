@@ -80,6 +80,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.google.android.gms.ads.MobileAds.initialize(this) {}
         enableEdgeToEdge()
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val windowInsetsController = WindowInsetsControllerCompat(window, window.decorView)
@@ -203,37 +204,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun promptStoragePermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-            try {
-                startActivity(intent)
-            } catch (_: Exception) {
-                startActivity(
-                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                )
-            }
-        } else {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE),
-                RC_STORAGE
-            )
-        }
-    }
+    private fun promptStoragePermission() {}
 
-    private fun hasStorageAccess(): Boolean =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            ) == PackageManager.PERMISSION_GRANTED
-        }
+    private fun hasStorageAccess(): Boolean = true
 
     private companion object {
         const val RC_STORAGE = 2001
@@ -395,15 +368,15 @@ private fun PermissionGate(appName: String, onGrant: () -> Unit) {
         )
         Spacer(Modifier.height(16.dp))
         Text(
-            text = "This app reads your karaoke content (MeowsiCat folder) from a shared location.\n" +
-                "Grant “All files access” so it can open the library.",
+            text = "Welcome to MeowsiCatTV Karaoke!\n" +
+                "Your karaoke library is ready to load.",
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(24.dp))
         Button(onClick = onGrant) {
-            Text("Grant access & continue")
+            Text("Start Karaoke")
         }
     }
 }

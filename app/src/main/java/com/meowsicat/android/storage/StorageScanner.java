@@ -95,8 +95,19 @@ public final class StorageScanner {
     }
 
     public static List<MgokLocation> scan(Context context) {
-        File file;
         ArrayList arrayList = new ArrayList();
+        try {
+            File appExternalMeowsiCat = context.getExternalFilesDir("MeowsiCat");
+            if (appExternalMeowsiCat != null) {
+                if (!appExternalMeowsiCat.exists()) {
+                    appExternalMeowsiCat.mkdirs();
+                }
+                if (appExternalMeowsiCat.exists() && appExternalMeowsiCat.isDirectory()) {
+                    arrayList.add(new MgokLocation(appExternalMeowsiCat, "App Storage (MeowsiCat)"));
+                }
+            }
+        } catch (Exception unused) {}
+
         for (File canonicalFile : getCandidateRoots(context)) {
             if (canonicalFile != null && canonicalFile.exists() && canonicalFile.isDirectory()) {
                 try {
@@ -104,25 +115,21 @@ public final class StorageScanner {
                 } catch (Exception unused) {
                 }
                 File[] fileArrListFiles = canonicalFile.listFiles();
-                if (fileArrListFiles == null) {
-                    file = null;
-                    break;
-                }
-                int length = fileArrListFiles.length;
-                int i = 0;
-                while (true) {
-                    if (i >= length) {
-                        file = null;
-                        break;
+                if (fileArrListFiles != null) {
+                    for (File f : fileArrListFiles) {
+                        if (f.isDirectory() && f.getName().equalsIgnoreCase(MGOK_FOLDER)) {
+                            boolean exists = false;
+                            for (Object loc : arrayList) {
+                                if (loc instanceof MgokLocation && ((MgokLocation) loc).root.equals(f)) {
+                                    exists = true;
+                                    break;
+                                }
+                            }
+                            if (!exists) {
+                                arrayList.add(new MgokLocation(f, labelForRoot(context, canonicalFile)));
+                            }
+                        }
                     }
-                    file = fileArrListFiles[i];
-                    if (file.isDirectory() && file.getName().equalsIgnoreCase(MGOK_FOLDER)) {
-                        break;
-                    }
-                    i++;
-                }
-                if (file != null) {
-                    arrayList.add(new MgokLocation(file, labelForRoot(context, canonicalFile)));
                 }
             }
         }

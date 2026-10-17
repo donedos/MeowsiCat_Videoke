@@ -2,7 +2,6 @@ package com.outofthebox.meowsicattv.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -37,10 +36,14 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.core.content.ContextCompat
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.VolumeUp
@@ -83,12 +86,14 @@ import com.meowsicat.android.storage.BgvSettings
 import com.meowsicat.android.storage.LyricSettings
 import com.meowsicat.android.storage.ScoreSettings
 import java.io.File
+import androidx.compose.material.icons.filled.Info
 
 @Composable
 fun SettingsScreen(
     currentRoot: String,
     onSave: (String) -> Unit,
     onThemeChanged: (Int) -> Unit = {},
+    onShowGuide: () -> Unit,
     onBack: () -> Unit
 ) {
     var draft by rememberSaveable(currentRoot) { mutableStateOf(currentRoot) }
@@ -171,6 +176,47 @@ fun SettingsScreen(
         }
     }
 
+    val uploadFilesLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            val rootDir = LibraryRepository.defaultRoot(context)
+            val idxDir = File(rootDir, "idx").apply { if (!exists()) mkdirs() }
+            val songsDir = File(rootDir, "songs").apply { if (!exists()) mkdirs() }
+            val soundDir = File(rootDir, "sound").apply { if (!exists()) mkdirs() }
+            val bgvDir = File(rootDir, "bgv").apply { if (!exists()) mkdirs() }
+            val bgphotoDir = File(rootDir, "bgphoto").apply { if (!exists()) mkdirs() }
+            val videosDir = File(rootDir, "videos").apply { if (!exists()) mkdirs() }
+
+            var count = 0
+            for (uri in uris) {
+                try {
+                    val name = getFileName(context, uri) ?: "file_${System.currentTimeMillis()}"
+                    val lower = name.lowercase()
+                    val target = when {
+                        lower.contains("shubidx") || lower.contains("shubblob") || lower.contains("megmid") || lower.endsWith(".idx") -> File(idxDir, name)
+                        lower.endsWith(".mid") || lower.endsWith(".kar") || lower.endsWith(".mp3") -> File(songsDir, name)
+                        lower.endsWith(".sf2") -> File(soundDir, name)
+                        lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".avi") -> File(bgvDir, name)
+                        lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp") -> File(bgphotoDir, name)
+                        else -> File(rootDir, name)
+                    }
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        target.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    count++
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+            if (count > 0) {
+                onSave(rootDir.absolutePath)
+            }
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -190,6 +236,19 @@ fun SettingsScreen(
         }
 
         item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Absolute.Left
+            ) {
+                TextButton(onClick = onShowGuide) {
+                    Icon(Icons.Filled.Info, contentDescription = "Setup Guide")
+                    Spacer(Modifier.width(8.dp))
+                    Text("View Setup Guide", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        item {
             ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -200,64 +259,47 @@ fun SettingsScreen(
                         )
                         Spacer(Modifier.padding(6.dp))
                         Text(
-                            text = "Content location",
+                            text = "Content & Database Files",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Folder containing idx/, songs/, bgv/, bgphoto/ and sound/ (expects shubidx and shubblob inside idx/).",
+                        text = "Upload your idx files, songs, bgv, bgphoto and soundfonts(.sf2) files directly into app storage.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     Spacer(Modifier.height(14.dp))
-                    OutlinedTextField(
-                        value = draft,
-                        onValueChange = { draft = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true,
-                        label = { Text("Absolute path") }
-                    )
-
-                    Spacer(Modifier.height(10.dp))
                     Button(
                         onClick = {
                             try {
-                                folderPickerLauncher.launch(null)
+                                uploadFilesLauncher.launch(arrayOf("*/*"))
                             } catch (e: Exception) {
                                 e.printStackTrace()
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                        Icon(Icons.Filled.UploadFile, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("Locate Folder Manually")
+                        Text("Upload Files (shubblob, shubidx, etc.)", fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(Modifier.height(14.dp))
                     Row {
                         TextButton(onClick = {
-                            draft = LibraryRepository.DEFAULT_ROOT
+                            onSave(LibraryRepository.defaultRoot(context).absolutePath)
                         }) {
                             Icon(Icons.Filled.Restore, contentDescription = null)
                             Spacer(Modifier.padding(4.dp))
-                            Text("Defaults: ${LibraryRepository.DEFAULT_ROOT}")
-                        }
-                        Spacer(Modifier.weight(1f))
-                        IconButton(
-                            onClick = { onSave(draft) },
-                            enabled = draft.isNotBlank()
-                        ) {
-                            Icon(
-                                Icons.Filled.Check,
-                                contentDescription = "Save and reload library",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
+                            Text("Reset / Reload Library")
                         }
                     }
                 }
@@ -609,7 +651,7 @@ fun SettingsScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Choose the sound font used to play MIDI. Fonts are read from the sound/ folder inside SongHub. Applies on the next playback.",
+                        text = "Choose the sound font used to play MIDI.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1594,6 +1636,30 @@ private fun SettingRow(
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
         )
     }
+}
+
+private fun getFileName(context: Context, uri: Uri): String? {
+    var result: String? = null
+    if (uri.scheme == "content") {
+        try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) {
+                        result = cursor.getString(idx)
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+    }
+    if (result == null) {
+        result = uri.path
+        val cut = result?.lastIndexOf('/')
+        if (cut != null && cut != -1) {
+            result = result?.substring(cut + 1)
+        }
+    }
+    return result
 }
 
 @Composable
