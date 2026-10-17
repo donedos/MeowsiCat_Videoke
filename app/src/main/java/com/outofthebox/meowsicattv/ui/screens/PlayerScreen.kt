@@ -384,6 +384,8 @@ private fun LyricPlayer(
     }
     var showSearchDialog by rememberSaveable { mutableStateOf(false) }
     var showRsvDialog by rememberSaveable { mutableStateOf(false) }
+    var showFavDialog by rememberSaveable { mutableStateOf(false) }
+    var favoriteSongs by remember { mutableStateOf<List<SongItem>>(emptyList()) }
     var showQrDialog by rememberSaveable { mutableStateOf(false) }
     var statusToast by remember { mutableStateOf<String?>(null) }
     var lastBackPressTime by remember { mutableLongStateOf(0L) }
@@ -450,6 +452,14 @@ private fun LyricPlayer(
         if (statusToast != null) {
             delay(2500L)
             statusToast = null
+        }
+    }
+
+    // Refresh the favorites list whenever the favorites panel is opened (also covers
+    // recomposition after a configuration change while the panel is showing).
+    LaunchedEffect(showFavDialog) {
+        if (showFavDialog) {
+            favoriteSongs = FavoritesStore.getFavorites(context, library.songs)
         }
     }
 
@@ -1065,6 +1075,7 @@ private fun LyricPlayer(
                     showQrDialog -> 420.dp + 24.dp
                     showSearchDialog -> 420.dp + 24.dp
                     showRsvDialog -> 420.dp + 24.dp
+                    showFavDialog -> 420.dp + 24.dp
                     controlsVisible -> CustomKeyboardWidth + 24.dp
                     else -> 24.dp
                 },
@@ -1118,10 +1129,16 @@ private fun LyricPlayer(
                 }
             }
         } else {
+            val isPortraitDialogActive = showSearchDialog || showRsvDialog || showQrDialog || showFavDialog
+            val reservedBottom = animateDpAsState(
+                targetValue = if (isPortraitDialogActive) 320.dp else 16.dp,
+                label = "portraitBottomInset"
+            ).value
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 16.dp),
+                    .padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = reservedBottom),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 TopSongHeader(
@@ -1136,7 +1153,6 @@ private fun LyricPlayer(
 
                 Spacer(Modifier.height(8.dp))
 
-                val isPortraitDialogActive = showSearchDialog || showRsvDialog || showQrDialog
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -1222,6 +1238,11 @@ private fun LyricPlayer(
                             toggleVocal()
                             statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
                         },
+                        onFavPress = {
+                            favoriteSongs = FavoritesStore.getFavorites(context, library.songs)
+                            showFavDialog = true
+                            controlsVisible = false
+                        },
                         onBgvToggle = {
                             bgvIndex++
                             statusToast = "BGV Switched"
@@ -1294,6 +1315,11 @@ private fun LyricPlayer(
                     onVocalToggle = {
                         toggleVocal()
                         statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
+                    },
+                    onFavPress = {
+                        favoriteSongs = FavoritesStore.getFavorites(context, library.songs)
+                        showFavDialog = true
+                        controlsVisible = false
                     },
                     onBgvToggle = {
                         bgvIndex++
@@ -1389,6 +1415,35 @@ private fun LyricPlayer(
                 onClearQueue = {
                     reservationQueue = emptyList()
                     statusToast = "Queue Cleared"
+                }
+            )
+        }
+
+        if (showFavDialog) {
+            FavoritesDialog(
+                songs = favoriteSongs,
+                onDismiss = { showFavDialog = false },
+                onPlayNow = { s ->
+                    reservationQueue = reservationQueue - s
+                    onSelectSong(s)
+                    posMs = 0.0
+                    scored = false
+                    pendingScore = -1
+                    playing = true
+                    showFavDialog = false
+                    statusToast = "Now Playing: ${s.displayTitle()}"
+                },
+                onReserveSong = { s ->
+                    reservationQueue = reservationQueue + s
+                    statusToast = "Reserved: ${s.displayTitle()}"
+                    if (song.code == 0) {
+                        playNextSongInQueue()
+                    }
+                },
+                onRemoveFavorite = { s ->
+                    FavoritesStore.toggleFavorite(context, s.code)
+                    favoriteSongs = FavoritesStore.getFavorites(context, library.songs)
+                    statusToast = "Removed from Favorites"
                 }
             )
         }
@@ -1677,6 +1732,7 @@ private fun CustomKeyboard(
     onNextPress: () -> Unit,
     onPrevPress: () -> Unit,
     onVocalToggle: () -> Unit,
+    onFavPress: () -> Unit,
     onBgvToggle: () -> Unit,
     searchFocusRequester: FocusRequester? = null,
     digitFocusRequesters: Map<Char, FocusRequester> = emptyMap(),
@@ -1844,18 +1900,36 @@ private fun CustomKeyboard(
                             Text("QR", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color.White)
                         }
                     }
-                    KeypadButton(
-                        onClick = onVocalToggle,
-                        backgroundColor = if (vocalActive) primaryContainer else primaryContainer.copy(alpha = 0.85f),
-                        focusedColor = accent,
-                        modifier = Modifier.fillMaxWidth().height(KeyboardKeyHeight)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = if (vocalActive) Icons.Filled.Mic else Icons.Filled.MicOff,
-                            contentDescription = "Vocal",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        KeypadButton(
+                            onClick = onFavPress,
+                            backgroundColor = Color(0xFF9D174D).copy(alpha = 0.9f),
+                            focusedColor = Color(0xFFF472B6),
+                            modifier = Modifier.weight(1f).height(KeyboardKeyHeight)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Favorite,
+                                contentDescription = "Favorites",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        KeypadButton(
+                            onClick = onVocalToggle,
+                            backgroundColor = if (vocalActive) primaryContainer else primaryContainer.copy(alpha = 0.85f),
+                            focusedColor = accent,
+                            modifier = Modifier.weight(1f).height(KeyboardKeyHeight)
+                        ) {
+                            Icon(
+                                imageVector = if (vocalActive) Icons.Filled.Mic else Icons.Filled.MicOff,
+                                contentDescription = "Vocal",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                     KeypadButton(
                         onClick = onBgvToggle,
@@ -2508,6 +2582,217 @@ private fun ReservationListDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun FavoritesPanelContent(
+    songs: List<SongItem>,
+    onDismiss: () -> Unit,
+    onPlayNow: (SongItem) -> Unit,
+    onReserveSong: (SongItem) -> Unit,
+    onRemoveFavorite: (SongItem) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Favorites (${songs.size})",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.weight(1f)
+            )
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.15f))
+            ) {
+                Icon(Icons.Filled.Clear, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(20.dp))
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        if (songs.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No favorite songs yet",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White.copy(alpha = 0.6f)
+                )
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+            ) {
+                items(songs, key = { it.code }) { song ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF1E293B))
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = song.displayTitle(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${song.displaySinger()} • #${song.displayCode()}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Spacer(Modifier.width(8.dp))
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Heart: remove this song from favorites
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF334155))
+                                    .clickable { onRemoveFavorite(song) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Favorite,
+                                    contentDescription = "Remove from Favorites",
+                                    tint = Color(0xFFF472B6),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            // "P" Play now
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF059669))
+                                    .clickable { onPlayNow(song) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "P",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White
+                                )
+                            }
+
+                            // "R" Reserve
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFF2563EB))
+                                    .clickable { onReserveSong(song) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "R",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Black,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Landscape / TV: a panel docked on the right so the lyrics stay visible on the left.
+ * (In portrait the panel is rendered inline at the bottom of the layout instead — see
+ * the portrait branch of LyricPlayer — so it reserves space rather than covering the lyrics.)
+ */
+@Composable
+private fun FavoritesDialog(
+    songs: List<SongItem>,
+    onDismiss: () -> Unit,
+    onPlayNow: (SongItem) -> Unit,
+    onReserveSong: (SongItem) -> Unit,
+    onRemoveFavorite: (SongItem) -> Unit
+) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val isTv = rememberIsTvDevice()
+    val isRightPanel = isLandscape || isTv
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = { onDismiss() })
+            },
+        contentAlignment = if (isRightPanel) Alignment.CenterEnd else Alignment.BottomCenter
+    ) {
+        Surface(
+            modifier = if (isRightPanel) {
+                Modifier
+                    .width(420.dp)
+                    .fillMaxHeight()
+                    .padding(vertical = 12.dp, horizontal = 16.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures { }
+                    }
+            } else {
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.52f)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures { }
+                    }
+            },
+            shape = if (isRightPanel) RoundedCornerShape(20.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
+            color = Color(0xFF0F172A).copy(alpha = 0.96f),
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+            tonalElevation = 16.dp
+        ) {
+            FavoritesPanelContent(
+                songs = songs,
+                onDismiss = onDismiss,
+                onPlayNow = onPlayNow,
+                onReserveSong = onReserveSong,
+                onRemoveFavorite = onRemoveFavorite,
+                modifier = Modifier.fillMaxSize()
+            )
         }
     }
 }
@@ -3178,8 +3463,8 @@ private fun QrCodeDialog(
             } else {
                 Modifier
                     .fillMaxWidth()
-                    .wrapContentHeight()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .fillMaxHeight(0.52f)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
                     .pointerInput(Unit) { detectTapGestures { } }
             },
             shape = if (isRightPanel) RoundedCornerShape(20.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
