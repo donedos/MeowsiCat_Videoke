@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Piano
 import androidx.compose.material.icons.filled.Restore
@@ -31,9 +32,11 @@ import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.QrCode
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -56,6 +59,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -71,21 +75,23 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.outofthebox.meowsicattv.data.LibraryRepository
 import com.outofthebox.meowsicattv.ui.components.TopBar
-import com.songhub.android.audio.SoundFontManager
-import com.songhub.android.storage.AudioSettings
-import com.songhub.android.storage.BehaviorSettings
-import com.songhub.android.storage.BgvSettings
-import com.songhub.android.storage.LyricSettings
-import com.songhub.android.storage.ScoreSettings
+import com.outofthebox.meowsicattv.ui.lyricFontFamily
+import com.meowsicat.android.audio.SoundFontManager
+import com.meowsicat.android.storage.AudioSettings
+import com.meowsicat.android.storage.BehaviorSettings
+import com.meowsicat.android.storage.BgvSettings
+import com.meowsicat.android.storage.LyricSettings
+import com.meowsicat.android.storage.ScoreSettings
 import java.io.File
 
 @Composable
 fun SettingsScreen(
     currentRoot: String,
     onSave: (String) -> Unit,
+    onThemeChanged: (Int) -> Unit = {},
     onBack: () -> Unit
 ) {
-    var draft by rememberSaveable { mutableStateOf(currentRoot) }
+    var draft by rememberSaveable(currentRoot) { mutableStateOf(currentRoot) }
     val context = LocalContext.current
     val soundFonts by produceState(
         initialValue = emptyList<File>(),
@@ -95,6 +101,10 @@ fun SettingsScreen(
     }
     var selectedFont by remember {
         mutableStateOf<String?>(SoundFontManager.getSelectedSoundFontPath(context))
+    }
+
+    var currentTheme by remember {
+        mutableIntStateOf(BehaviorSettings.getAppTheme(context))
     }
 
     var lyricStyle by remember {
@@ -123,6 +133,10 @@ fun SettingsScreen(
 
     var bgvMode by remember {
         mutableStateOf(BgvSettings.getMode(context))
+    }
+
+    var staticPhotoPath by remember {
+        mutableStateOf(BgvSettings.getStaticPhotoPath(context))
     }
 
     var floatingCatEnabled by remember {
@@ -173,129 +187,6 @@ fun SettingsScreen(
     ) {
         item {
             TopBar(onBack = onBack, title = "Settings")
-        }
-
-        // MIDI ENGINE SECTION
-        item {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "MIDI ENGINE",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                )
-                Spacer(Modifier.height(4.dp))
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        MidiVolumeDropdown(
-                            title = "MIDI Master Volume",
-                            currentVol = midiMasterVol,
-                            onVolSelected = {
-                                midiMasterVol = it
-                                AudioSettings.setMidiMasterVolume(context, it)
-                            }
-                        )
-
-                        MidiVolumeDropdown(
-                            title = "MP3 Master Volume",
-                            currentVol = mp3MasterVol,
-                            onVolSelected = {
-                                mp3MasterVol = it
-                                AudioSettings.setMp3MasterVolume(context, it)
-                            }
-                        )
-
-                        // Vocal Mode / Multiplex
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Filled.GraphicEq,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                            Spacer(Modifier.width(16.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Vocal Mode (Multiplex)",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                                Text(
-                                    text = if (vocalEnabled) "Enabled: MIDI and audio active" else "Disabled: Only MP3/audio, MIDI lyrics only",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = vocalEnabled,
-                                onCheckedChange = {
-                                    vocalEnabled = it
-                                    AudioSettings.setVocalEnabled(context, it)
-                                }
-                            )
-                        }
-
-                        ReverbChorusDropdown(
-                            title = "MIDI Reverb",
-                            currentLevel = reverbLevel,
-                            onLevelSelected = {
-                                reverbLevel = it
-                                AudioSettings.setReverb(context, it)
-                            }
-                        )
-
-                        ReverbChorusDropdown(
-                            title = "MIDI Chorus",
-                            currentLevel = chorusLevel,
-                            onLevelSelected = {
-                                chorusLevel = it
-                                AudioSettings.setChorus(context, it)
-                            }
-                        )
-
-                        PolyphonyDropdown(
-                            currentVoices = polyphonyVoices,
-                            onVoicesSelected = {
-                                polyphonyVoices = it
-                                AudioSettings.setPolyphony(context, it)
-                            }
-                        )
-
-                        MelodyChannelDropdown(
-                            currentChan = melodyChan,
-                            onChanSelected = {
-                                melodyChan = it
-                                AudioSettings.setMelodyChannel(context, it)
-                            }
-                        )
-
-                        WipeChannelDropdown(
-                            currentWipe = wipeChan,
-                            onWipeSelected = {
-                                wipeChan = it
-                                AudioSettings.setWipeMelodyChannel(context, it)
-                            }
-                        )
-
-                        TypingVolumeDropdown(
-                            currentVol = typingVol,
-                            onVolSelected = {
-                                typingVol = it
-                                AudioSettings.setTypingVolumeLevel(context, it)
-                            }
-                        )
-                    }
-                }
-            }
         }
 
         item {
@@ -402,6 +293,43 @@ fun SettingsScreen(
                         onStyleSelected = { newStyle ->
                             LyricSettings.setLyricStyle(context, newStyle)
                             lyricStyle = newStyle
+                        }
+                    )
+                }
+            }
+        }
+
+        // APP COLOR THEME CARD WITH DROPDOWN
+        item {
+            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Filled.Palette,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.padding(6.dp))
+                        Text(
+                            text = "App Color Theme",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "Customize the accent colors and highlights of the app based on iOS color schemes.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(Modifier.height(14.dp))
+                    AppThemeDropdown(
+                        currentTheme = currentTheme,
+                        onThemeSelected = { newTheme ->
+                            BehaviorSettings.setAppTheme(context, newTheme)
+                            currentTheme = newTheme
+                            onThemeChanged(newTheme)
                         }
                     )
                 }
@@ -608,6 +536,14 @@ fun SettingsScreen(
                     bgvDir.walkTopDown().count { it.isFile && it.extension.equals("mp4", ignoreCase = true) }
                 } else 0
             }
+            val photoDir = remember(currentRoot) {
+                BgvSettings.getBgPhotoDirectory(context, currentRoot)
+            }
+            val photoCount = remember(photoDir) {
+                if (photoDir != null && photoDir.exists()) {
+                    photoDir.walkTopDown().count { it.isFile && it.extension.lowercase() in listOf("jpg", "jpeg", "png") }
+                } else 0
+            }
 
             ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(20.dp)) {
@@ -619,14 +555,14 @@ fun SettingsScreen(
                         )
                         Spacer(Modifier.padding(6.dp))
                         Text(
-                            text = "Background Video (BGV)",
+                            text = "Background",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Play .mp4 background videos during song playback from the bgv/ folder. ($mp4Count .mp4 files found)",
+                        text = "Play .mp4 background videos from bgv/ ($mp4Count found) or static background photos from bgphoto/ ($photoCount found).",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -639,6 +575,18 @@ fun SettingsScreen(
                             bgvMode = newMode
                         }
                     )
+
+                    if (bgvMode == BgvSettings.MODE_STATIC_PHOTO) {
+                        StaticPhotoDropdown(
+                            context = context,
+                            currentRoot = currentRoot,
+                            currentPath = staticPhotoPath,
+                            onPhotoSelected = { path ->
+                                staticPhotoPath = path
+                                BgvSettings.setStaticPhotoPath(context, path)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -679,6 +627,129 @@ fun SettingsScreen(
                             selectedFont = path
                         }
                     )
+                }
+            }
+        }
+
+        // MIDI ENGINE SECTION
+        item {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "MIDI ENGINE",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        MidiVolumeDropdown(
+                            title = "MIDI Master Volume",
+                            currentVol = midiMasterVol,
+                            onVolSelected = {
+                                midiMasterVol = it
+                                AudioSettings.setMidiMasterVolume(context, it)
+                            }
+                        )
+
+                        MidiVolumeDropdown(
+                            title = "MP3 Master Volume",
+                            currentVol = mp3MasterVol,
+                            onVolSelected = {
+                                mp3MasterVol = it
+                                AudioSettings.setMp3MasterVolume(context, it)
+                            }
+                        )
+
+                        // Vocal Mode / Multiplex
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp, horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Filled.GraphicEq,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Vocal Mode (Multiplex)",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = if (vocalEnabled) "Enabled: MIDI and audio active" else "Disabled: Only MP3/audio, MIDI lyrics only",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = vocalEnabled,
+                                onCheckedChange = {
+                                    vocalEnabled = it
+                                    AudioSettings.setVocalEnabled(context, it)
+                                }
+                            )
+                        }
+
+                        ReverbChorusDropdown(
+                            title = "MIDI Reverb",
+                            currentLevel = reverbLevel,
+                            onLevelSelected = {
+                                reverbLevel = it
+                                AudioSettings.setReverb(context, it)
+                            }
+                        )
+
+                        ReverbChorusDropdown(
+                            title = "MIDI Chorus",
+                            currentLevel = chorusLevel,
+                            onLevelSelected = {
+                                chorusLevel = it
+                                AudioSettings.setChorus(context, it)
+                            }
+                        )
+
+                        PolyphonyDropdown(
+                            currentVoices = polyphonyVoices,
+                            onVoicesSelected = {
+                                polyphonyVoices = it
+                                AudioSettings.setPolyphony(context, it)
+                            }
+                        )
+
+                        MelodyChannelDropdown(
+                            currentChan = melodyChan,
+                            onChanSelected = {
+                                melodyChan = it
+                                AudioSettings.setMelodyChannel(context, it)
+                            }
+                        )
+
+                        WipeChannelDropdown(
+                            currentWipe = wipeChan,
+                            onWipeSelected = {
+                                wipeChan = it
+                                AudioSettings.setWipeMelodyChannel(context, it)
+                            }
+                        )
+
+                        TypingVolumeDropdown(
+                            currentVol = typingVol,
+                            onVolSelected = {
+                                typingVol = it
+                                AudioSettings.setTypingVolumeLevel(context, it)
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -825,16 +896,18 @@ private fun FontDropdown(
     onFontSelected: (Int) -> Unit
 ) {
     val fontOptions = listOf(
-        FontOption(0, "Videoke (Default)"),
-        FontOption(10, "Fredoka (Rounded Karaoke - Featured Style)"),
-        FontOption(20, "Montserrat Bold"),
+        FontOption(20, "Montserrat Bold (Default)"),
+        FontOption(0, "Videoke"),
+        FontOption(10, "Fredoka (Rounded Karaoke)"),
         FontOption(21, "Poppins Bold"),
         FontOption(1, "Roboto Bold"),
         FontOption(22, "Quicksand"),
         FontOption(4, "Arial Black")
     )
     var expanded by remember { mutableStateOf(false) }
-    val selectedName = fontOptions.find { it.id == currentType }?.name ?: "Videoke (Default)"
+    val selected = fontOptions.find { it.id == currentType }
+    val selectedName = selected?.name ?: "Montserrat Bold (Default)"
+    val selectedFamily = lyricFontFamily(currentType)
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -846,6 +919,7 @@ private fun FontDropdown(
             onValueChange = {},
             readOnly = true,
             label = { Text("Select Font") },
+            textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = selectedFamily),
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             modifier = Modifier
                 .menuAnchor()
@@ -857,8 +931,23 @@ private fun FontDropdown(
             onDismissRequest = { expanded = false }
         ) {
             fontOptions.forEach { option ->
+                val optionFamily = lyricFontFamily(option.id)
                 DropdownMenuItem(
-                    text = { Text(option.name) },
+                    text = {
+                        Column {
+                            Text(
+                                text = option.name,
+                                fontFamily = optionFamily,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Aa Bb Cc 123",
+                                fontFamily = optionFamily,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
                     onClick = {
                         onFontSelected(option.id)
                         expanded = false
@@ -1018,6 +1107,7 @@ private fun BgvDropdown(
 ) {
     val options = listOf(
         BgvOption(BgvSettings.MODE_VIDEOS, "On — Play .mp4 background videos from bgv/"),
+        BgvOption(BgvSettings.MODE_STATIC_PHOTO, "Static background photo from bgphoto/"),
         BgvOption(3, "Off — Default dark gradient background")
     )
     var expanded by remember { mutableStateOf(false) }
@@ -1046,6 +1136,106 @@ private fun BgvDropdown(
                     text = { Text(option.name) },
                     onClick = {
                         onModeSelected(option.mode)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StaticPhotoDropdown(
+    context: Context,
+    currentRoot: String,
+    currentPath: String,
+    onPhotoSelected: (String) -> Unit
+) {
+    val photos = remember(currentRoot, context) {
+        BgvSettings.getAvailableBgPhotos(context, currentRoot)
+    }
+    var expanded by remember { mutableStateOf(false) }
+    val selectedFile = photos.find { it.absolutePath == currentPath } ?: photos.firstOrNull()
+    val selectedName = selectedFile?.name ?: if (photos.isEmpty()) "No static photos found in bgphoto/" else "Select photo..."
+
+    if (photos.isNotEmpty()) {
+        Spacer(Modifier.height(10.dp))
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = !expanded },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            OutlinedTextField(
+                value = selectedName,
+                onValueChange = {},
+                readOnly = true,
+                label = { Text("Select Static Photo") },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier.menuAnchor().fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                photos.forEach { file ->
+                    DropdownMenuItem(
+                        text = { Text(file.name) },
+                        onClick = {
+                            onPhotoSelected(file.absolutePath)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class ThemeOption(val themeId: Int, val name: String)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AppThemeDropdown(
+    currentTheme: Int,
+    onThemeSelected: (Int) -> Unit
+) {
+    val options = listOf(
+        ThemeOption(BehaviorSettings.THEME_DEFAULT, "MeowsiCat Teal (Default)"),
+        ThemeOption(BehaviorSettings.THEME_IOS_BLUE, "MeowsiCat Blue"),
+        ThemeOption(BehaviorSettings.THEME_IOS_PURPLE, "MeowsiCat Purple"),
+        ThemeOption(BehaviorSettings.THEME_IOS_INDIGO, "MeowsiCat Indigo"),
+        ThemeOption(BehaviorSettings.THEME_IOS_PINK, "MeowsiCat Pink"),
+        ThemeOption(BehaviorSettings.THEME_IOS_ORANGE, "MeowsiCat Orange"),
+        ThemeOption(BehaviorSettings.THEME_IOS_GREEN, "MeowsiCat Green")
+    )
+    var expanded by remember { mutableStateOf(false) }
+    val selectedName = options.find { it.themeId == currentTheme }?.name ?: "MeowsiCat Teal (Default)"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = selectedName,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Select Color Theme") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option.name) },
+                    onClick = {
+                        onThemeSelected(option.themeId)
                         expanded = false
                     }
                 )
@@ -1451,16 +1641,19 @@ private fun OptionRow(
 private fun uriToAbsolutePath(uri: Uri): String? {
     val path = uri.path ?: return null
     if (path.contains("raw:")) {
-        return path.substringAfter("raw:")
+        val raw = path.substringAfter("raw:")
+        return if (raw.startsWith("/")) raw else "/$raw"
     }
-    if (path.contains("primary:")) {
-        val sub = path.substringAfter("primary:")
-        return "/storage/emulated/0/$sub"
+    val docId = runCatching { DocumentsContract.getTreeDocumentId(uri) }
+        .getOrNull()
+        ?.takeIf { it.isNotBlank() }
+        ?: path.substringAfterLast("/tree/", "").takeIf { it.isNotBlank() }
+        ?: return null
+    val volume = docId.substringBefore(':', missingDelimiterValue = "")
+    val rel = docId.substringAfter(':', missingDelimiterValue = "").trim('/')
+    val base = when {
+        volume.isEmpty() || volume.equals("primary", ignoreCase = true) -> "/storage/emulated/0"
+        else -> "/storage/$volume"
     }
-    val split = path.split(":")
-    if (split.size > 1) {
-        val rel = split.last()
-        return "/storage/emulated/0/$rel"
-    }
-    return null
+    return if (rel.isEmpty()) base else "$base/$rel"
 }

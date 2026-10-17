@@ -1,9 +1,15 @@
 package com.outofthebox.meowsicattv.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -51,9 +57,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -112,49 +125,71 @@ private val GoogleBlue = Color(0xFF4285F4)
 private val GoogleRed = Color(0xFFEA4335)
 private val GoogleYellow = Color(0xFFFBBC04)
 private val GoogleGreen = Color(0xFF34A853)
-private val GoogleInk = Color(0xFF202124)
-
-/** Small 2x2 four-colour mark in the Google palette. */
-@Composable
-private fun GoogleMark(modifier: Modifier = Modifier) {
-    Box(modifier = modifier.clip(CircleShape)) {
-        Column(Modifier.fillMaxSize()) {
-            Row(Modifier.fillMaxWidth().weight(1f)) {
-                Box(Modifier.weight(1f).fillMaxHeight().background(GoogleBlue))
-                Box(Modifier.weight(1f).fillMaxHeight().background(GoogleRed))
-            }
-            Row(Modifier.fillMaxWidth().weight(1f)) {
-                Box(Modifier.weight(1f).fillMaxHeight().background(GoogleYellow))
-                Box(Modifier.weight(1f).fillMaxHeight().background(GoogleGreen))
-            }
-        }
-    }
-}
 
 /**
  * "INSTRUMENTAL" pill shown for songs with no vocal track, styled after
  * Google's brand: white pill, Google Sans-ish bold caps, four-colour mark.
+ * [glow] adds a rotating four-colour halo around the pill.
  */
 @Composable
-fun InstrumentalBadge(modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier.shadow(3.dp, CircleShape, clip = false),
-        shape = RoundedCornerShape(50),
-        color = Color.White,
-        contentColor = GoogleInk
+fun InstrumentalBadge(modifier: Modifier = Modifier, glow: Boolean = true) {
+    val colors = listOf(GoogleBlue, GoogleRed, GoogleYellow, GoogleGreen, GoogleBlue)
+    val transition = rememberInfiniteTransition(label = "badgeGlow")
+    val pulse by transition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            tween(1400, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse
+        ),
+        label = "badgeGlowPulse"
+    )
+
+    Box(
+        modifier = modifier
+            .then(if (!glow) Modifier else Modifier.padding(14.dp)),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-        ) {
-            GoogleMark(Modifier.size(12.dp))
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = "INSTRUMENTAL",
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 11.sp,
-                letterSpacing = 0.9.sp
+        if (glow) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .padding(4.dp)
+                    .drawBehind {
+                        val pillRadius = (size.height / 2f)
+                        val brush = Brush.sweepGradient(colors)
+                        for (i in 0..3) {
+                            val grow = pillRadius * 0.35f * pulse * (0.5f + i * 0.3f)
+                            drawRoundRect(
+                                brush = brush,
+                                topLeft = Offset(-grow, -grow),
+                                size = Size(size.width + grow * 2f, size.height + grow * 2f),
+                                cornerRadius = CornerRadius(pillRadius + grow),
+                                style = Stroke(width = (4f - i.toFloat()) * 1.2f),
+                                alpha = (0.35f - i * 0.08f) * pulse
+                            )
+                        }
+                    }
             )
+        }
+        Surface(
+            modifier = Modifier.shadow(6.dp, CircleShape, clip = false),
+            shape = RoundedCornerShape(50),
+            color = Color(0xFF1E1F22),
+            contentColor = Color.White
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+            ) {
+                Text(
+                    text = "INSTRUMENTAL",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 12.sp,
+                    letterSpacing = 1.2.sp,
+                    color = Color.White
+                )
+            }
         }
     }
 }

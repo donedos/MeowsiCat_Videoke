@@ -134,6 +134,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.painterResource
 import com.outofthebox.meowsicattv.R
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -162,22 +163,28 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
-import com.songhub.android.audio.BassMidiEngine
-import com.songhub.android.audio.MicScoringSession
-import com.songhub.android.audio.SoundFontManager
-import com.songhub.android.model.CountdownGroup
-import com.songhub.android.model.LyricLine
-import com.songhub.android.parser.TempoUtils
-import com.songhub.android.song.ScoreCalculator
-import com.songhub.android.storage.AudioSettings
-import com.songhub.android.storage.BehaviorSettings
-import com.songhub.android.storage.BgvSettings
-import com.songhub.android.storage.LyricSettings
-import com.songhub.android.storage.ScoreSettings
+import coil.compose.AsyncImage
+import com.meowsicat.android.audio.BassMidiEngine
+import com.meowsicat.android.audio.MicScoringSession
+import com.meowsicat.android.audio.SoundFontManager
+import com.meowsicat.android.model.CountdownGroup
+import com.meowsicat.android.model.LyricLine
+import com.meowsicat.android.parser.TempoUtils
+import com.meowsicat.android.song.ScoreCalculator
+import com.meowsicat.android.storage.AudioSettings
+import com.meowsicat.android.storage.BehaviorSettings
+import com.meowsicat.android.storage.BgvSettings
+import com.meowsicat.android.storage.LyricSettings
+import com.meowsicat.android.storage.ScoreSettings
 import com.outofthebox.meowsicattv.data.LibraryRepository
 import com.outofthebox.meowsicattv.data.LyricLoader
+import com.outofthebox.meowsicattv.data.MsSpan
 import com.outofthebox.meowsicattv.data.SongItem
 import com.outofthebox.meowsicattv.data.ScoreStore
+import com.outofthebox.meowsicattv.ui.lyricFontFamily
+import com.outofthebox.meowsicattv.ui.lyrics.MIN_LYRIC_SCALE
+import com.outofthebox.meowsicattv.ui.lyrics.fitScaleForLines
+import com.outofthebox.meowsicattv.ui.lyrics.wrapFragmentRanges
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -194,6 +201,14 @@ private val KeyboardKeyHeight = 40.dp
 
 /** Frame interval used while polling the MIDI transport so the wipe stays smooth. */
 private const val AUDIO_POLL_MS = 16L
+
+/** Allowed key-shift range, in semitones. */
+private const val KEY_SHIFT_MIN = -10
+private const val KEY_SHIFT_MAX = 10
+
+/** Allowed tempo-shift range, in steps of 5% (so -10 => 50%, +10 => 150%). */
+private const val TEMPO_SHIFT_MIN = -10
+private const val TEMPO_SHIFT_MAX = 10
 
 @Composable
 fun PlayerScreen(
@@ -237,6 +252,7 @@ fun PlayerScreen(
         ticksPerBeat = parsed.ticksPerBeat,
         totalMs = parsed.totalMs,
         isInstrumental = parsed.instrumental && activeSong.code != 0,
+        instrumentalBreaks = parsed.instrumentalBreaks,
         context = context,
         libraryRoot = libraryRoot,
         onBack = onBack,
@@ -306,6 +322,7 @@ private fun LyricPlayer(
     ticksPerBeat: Int,
     totalMs: Double,
     isInstrumental: Boolean = false,
+    instrumentalBreaks: List<MsSpan> = emptyList(),
     context: Context,
     libraryRoot: File,
     onBack: () -> Unit,
@@ -375,6 +392,10 @@ private fun LyricPlayer(
     // Controls visibility
     var controlsVisible by rememberSaveable { mutableStateOf(!isTvDevice) }
 
+    // Height (px) of the portrait lyrics area. Shrinks when the on-screen keypad is shown, which
+    // is used to auto-shrink the lyric font so phrases are not clipped.
+    var portraitLyricHeightPx by remember { mutableIntStateOf(0) }
+
     BackHandler {
         val now = System.currentTimeMillis()
         if (codeInput.isNotEmpty()) {
@@ -396,8 +417,23 @@ private fun LyricPlayer(
     // Key, Tempo, Melody states
     var keyShift by rememberSaveable { mutableIntStateOf(0) }
     var temShift by rememberSaveable { mutableIntStateOf(0) }
-    var melVol by rememberSaveable { mutableIntStateOf(40) }
-    var vocalActive by rememberSaveable { mutableStateOf(true) }
+    var melVol by rememberSaveable { mutableIntStateOf(AudioSettings.getMelodyVolume(context)) }
+    var vocalActive by rememberSaveable { mutableStateOf(melVol > 0) }
+
+    // Melody (guide vocal) volume is persisted so the player restores the user's last chosen
+    // level across songs and app restarts.
+    val applyMelodyVolume: (Int) -> Unit = { value ->
+        melVol = value.coerceIn(0, 100)
+        vocalActive = melVol > 0
+        engine.setMelodyVolume(melVol)
+        AudioSettings.setMelodyVolume(context, melVol)
+    }
+    val toggleVocal: () -> Unit = {
+        val nextOn = !vocalActive
+        melVol = if (nextOn) AudioSettings.getMelodyVolume(context).let { if (it > 0) it else 80 } else 0
+        vocalActive = nextOn
+        engine.setMelodyVolume(melVol)
+    }
 
     val effectiveTotalMs = remember(totalMs, audioDurationMs) {
         maxOf(totalMs, audioDurationMs)
@@ -450,11 +486,11 @@ private fun LyricPlayer(
         }
         keyShift = 0
         temShift = 0
-        melVol = 40
-        vocalActive = true
+        melVol = AudioSettings.getMelodyVolume(context)
+        vocalActive = melVol > 0
         engine.setKey(0)
         engine.setTempo(100f)
-        engine.setMelodyVolume(40)
+        engine.setMelodyVolume(melVol)
 
         withContext(Dispatchers.IO) {
             val sf = SoundFontManager.getOrAutoPickSoundFont(context)
@@ -588,6 +624,34 @@ private fun LyricPlayer(
         }
     }
 
+    /**
+     * Halts the current song and returns to the idle placeholder without restarting the song,
+     * advancing the queue, or presenting a score. Used as the fallback for a manual Stop when
+     * no score is due.
+     */
+    fun stopPlayback() {
+        engine.stop()
+        playing = false
+        scored = true
+        pendingScore = -1
+        micSession.reset()
+        onSelectSong(SongItem.placeholder())
+        statusToast = "Playback Stopped — Select a Song"
+    }
+
+    /**
+     * Manual Stop (on-screen button and remote "stop"). With scoring enabled this ends the song
+     * like a natural finish so the score is shown; with scoring off it halts and returns to the
+     * idle placeholder instead of restarting the song or advancing the queue.
+     */
+    fun stopCurrentSong() {
+        engine.stop()
+        playing = false
+        if (!tryPresentScore()) {
+            stopPlayback()
+        }
+    }
+
     // Microphone scoring capture lifecycle: clear stale levels on song change,
     // capture while playing in MICROPHONE mode, and release the mic otherwise.
     LaunchedEffect(song.code, selectCounter) {
@@ -637,9 +701,7 @@ private fun LyricPlayer(
                     engine.pause()
                 }
                 "stop" -> {
-                    engine.stop()
-                    playing = false
-                    handleSongFinished()
+                    stopCurrentSong()
                 }
                 "next" -> {
                     if (reservationQueue.isNotEmpty()) {
@@ -775,9 +837,7 @@ private fun LyricPlayer(
     }
 
     fun handleStopPress() {
-        engine.stop()
-        playing = false
-        handleSongFinished()
+        stopCurrentSong()
     }
 
     LaunchedEffect(playing, audioReady, effectiveTotalMs, song.code, ticksPerBeat, tempoMap, selectCounter, replayEpoch) {
@@ -838,6 +898,8 @@ private fun LyricPlayer(
             idx
         }
     }
+
+    val inBreak = !isInstrumental && instrumentalBreaks.any { posMs in it }
 
     if (isInPipMode) {
         Box(
@@ -1020,6 +1082,7 @@ private fun LyricPlayer(
                     codeInput = codeInput,
                     typedSongPreview = typedSongPreview,
                     isInstrumental = isInstrumental,
+                    inBreak = inBreak,
                     isLandscape = true
                 )
 
@@ -1048,6 +1111,8 @@ private fun LyricPlayer(
                         lineIndex = lineIndex,
                         lyricStyle = lyricStyle,
                         isInstrumental = isInstrumental,
+                        inBreak = inBreak,
+                        isPortrait = false,
                         context = context
                     )
                 }
@@ -1065,6 +1130,7 @@ private fun LyricPlayer(
                     codeInput = codeInput,
                     typedSongPreview = typedSongPreview,
                     isInstrumental = isInstrumental,
+                    inBreak = inBreak,
                     isLandscape = false
                 )
 
@@ -1076,7 +1142,8 @@ private fun LyricPlayer(
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
-                        .then(if (isPortraitDialogActive) Modifier.padding(top = 16.dp) else Modifier),
+                        .then(if (isPortraitDialogActive) Modifier.padding(top = 16.dp) else Modifier)
+                        .onSizeChanged { portraitLyricHeightPx = it.height },
                     contentAlignment = if (isPortraitDialogActive) Alignment.TopCenter else Alignment.Center
                 ) {
                     PlayerCenterContent(
@@ -1090,7 +1157,12 @@ private fun LyricPlayer(
                         lineIndex = lineIndex,
                         lyricStyle = lyricStyle,
                         isInstrumental = isInstrumental,
-                        context = context
+                        inBreak = inBreak,
+                        isPortrait = true,
+                        context = context,
+                        availableHeightDp = if (portraitLyricHeightPx > 0) {
+                            with(LocalDensity.current) { portraitLyricHeightPx.toDp() }
+                        } else null
                     )
                 }
 
@@ -1110,9 +1182,9 @@ private fun LyricPlayer(
                         reservationCount = reservationQueue.size,
                         playing = playing,
                         vocalActive = vocalActive,
-                        onKeyChange = { keyShift = it; engine.setKey(keyShift) },
-                        onTemChange = { temShift = it; engine.setTempo((100 + temShift * 5).toFloat()) },
-                        onMelChange = { melVol = it; engine.setMelodyVolume(melVol) },
+                        onKeyChange = { keyShift = it.coerceIn(KEY_SHIFT_MIN, KEY_SHIFT_MAX); engine.setKey(keyShift) },
+                        onTemChange = { temShift = it.coerceIn(TEMPO_SHIFT_MIN, TEMPO_SHIFT_MAX); engine.setTempo((100 + temShift * 5).toFloat()) },
+                        onMelChange = applyMelodyVolume,
                         onDigitPress = { char -> handleDigitInput(char) },
                         onQrPress = {
                             showQrDialog = true
@@ -1147,9 +1219,7 @@ private fun LyricPlayer(
                             posTick = 0L
                         },
                         onVocalToggle = {
-                            vocalActive = !vocalActive
-                            melVol = if (vocalActive) 40 else 0
-                            engine.setMelodyVolume(melVol)
+                            toggleVocal()
                             statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
                         },
                         onBgvToggle = {
@@ -1185,9 +1255,9 @@ private fun LyricPlayer(
                     reservationCount = reservationQueue.size,
                     playing = playing,
                     vocalActive = vocalActive,
-                    onKeyChange = { keyShift = it; engine.setKey(keyShift) },
-                    onTemChange = { temShift = it; engine.setTempo((100 + temShift * 5).toFloat()) },
-                    onMelChange = { melVol = it; engine.setMelodyVolume(melVol) },
+                    onKeyChange = { keyShift = it.coerceIn(KEY_SHIFT_MIN, KEY_SHIFT_MAX); engine.setKey(keyShift) },
+                    onTemChange = { temShift = it.coerceIn(TEMPO_SHIFT_MIN, TEMPO_SHIFT_MAX); engine.setTempo((100 + temShift * 5).toFloat()) },
+                    onMelChange = applyMelodyVolume,
                     onDigitPress = { char -> handleDigitInput(char) },
                     onQrPress = {
                         showQrDialog = true
@@ -1222,9 +1292,7 @@ private fun LyricPlayer(
                         posTick = 0L
                     },
                     onVocalToggle = {
-                        vocalActive = !vocalActive
-                        melVol = if (vocalActive) 40 else 0
-                        engine.setMelodyVolume(melVol)
+                        toggleVocal()
                         statusToast = if (vocalActive) "Vocal: ON" else "Vocal: OFF"
                     },
                     onBgvToggle = {
@@ -1481,6 +1549,7 @@ private fun TopSongHeader(
     codeInput: String = "",
     typedSongPreview: SongItem? = null,
     isInstrumental: Boolean = false,
+    inBreak: Boolean = false,
     isLandscape: Boolean
 ) {
     val context = LocalContext.current
@@ -1528,10 +1597,6 @@ private fun TopSongHeader(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-
-                    if (isInstrumental) {
-                        InstrumentalBadge()
-                    }
                 }
 
                 val subtitleString = remember(song, reservationQueue) {
@@ -1554,7 +1619,7 @@ private fun TopSongHeader(
                 Text(
                     text = subtitleString,
                     style = if (isLandscape) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFF2DD4BF),
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1568,7 +1633,7 @@ private fun TopSongHeader(
 private fun StatusToastNotification(message: String) {
     Surface(
         shape = RoundedCornerShape(20.dp),
-        color = Color(0xFF0D9488).copy(alpha = 0.95f),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
         tonalElevation = 12.dp,
         modifier = Modifier.padding(top = 16.dp)
     ) {
@@ -1618,11 +1683,14 @@ private fun CustomKeyboard(
     shape: Shape = RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp),
     modifier: Modifier = Modifier
 ) {
-    val accent = Color(0xFF2DD4BF)
+    val accent = MaterialTheme.colorScheme.primary
+    val primaryContainer = MaterialTheme.colorScheme.primaryContainer
+    val secondary = MaterialTheme.colorScheme.secondary
+    val onPrimary = MaterialTheme.colorScheme.onPrimary
 
     Surface(
         shape = shape,
-        color = Color(0xFF022C28).copy(alpha = 0.94f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f),
         border = BorderStroke(1.5.dp, accent.copy(alpha = 0.35f)),
         tonalElevation = 16.dp,
         modifier = modifier.pointerInput(Unit) { detectTapGestures { } }
@@ -1674,6 +1742,8 @@ private fun CustomKeyboard(
                     containerColor = Color(0xFF854D0E).copy(alpha = 0.85f),
                     onDecrease = { onKeyChange(keyShift - 1) },
                     onIncrease = { onKeyChange(keyShift + 1) },
+                    decreaseEnabled = keyShift > KEY_SHIFT_MIN,
+                    increaseEnabled = keyShift < KEY_SHIFT_MAX,
                     modifier = Modifier.weight(1f)
                 )
                 AdjustmentPill(
@@ -1681,11 +1751,13 @@ private fun CustomKeyboard(
                     containerColor = Color(0xFF065F46).copy(alpha = 0.85f),
                     onDecrease = { onTemChange(temShift - 1) },
                     onIncrease = { onTemChange(temShift + 1) },
+                    decreaseEnabled = temShift > TEMPO_SHIFT_MIN,
+                    increaseEnabled = temShift < TEMPO_SHIFT_MAX,
                     modifier = Modifier.weight(1f)
                 )
                 AdjustmentPill(
                     label = "M $melVol",
-                    containerColor = Color(0xFF0D9488).copy(alpha = 0.85f),
+                    containerColor = primaryContainer.copy(alpha = 0.85f),
                     onDecrease = { onMelChange(maxOf(0, melVol - 20)) },
                     onIncrease = { onMelChange(minOf(100, melVol + 20)) },
                     modifier = Modifier.weight(1f)
@@ -1732,10 +1804,10 @@ private fun CustomKeyboard(
                         KeypadButton(
                             onClick = { onReservePress(false) },
                             backgroundColor = accent,
-                            focusedColor = Color(0xFF5EEAD4),
+                            focusedColor = secondary,
                             modifier = Modifier.weight(1f).height(KeyboardKeyHeight)
                         ) {
-                            Text("RES", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = Color(0xFF003731))
+                            Text("RES", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Black, color = onPrimary)
                         }
                         DigitKey('0', onDigitPress, digitFocusRequesters['0'], Modifier.weight(1f), keyHeight = KeyboardKeyHeight)
                         KeypadButton(
@@ -1774,7 +1846,7 @@ private fun CustomKeyboard(
                     }
                     KeypadButton(
                         onClick = onVocalToggle,
-                        backgroundColor = if (vocalActive) Color(0xFF0D9488) else Color(0xFF0F3832).copy(alpha = 0.85f),
+                        backgroundColor = if (vocalActive) primaryContainer else primaryContainer.copy(alpha = 0.85f),
                         focusedColor = accent,
                         modifier = Modifier.fillMaxWidth().height(KeyboardKeyHeight)
                     ) {
@@ -1787,7 +1859,7 @@ private fun CustomKeyboard(
                     }
                     KeypadButton(
                         onClick = onBgvToggle,
-                        backgroundColor = Color(0xFF0F3832).copy(alpha = 0.85f),
+                        backgroundColor = primaryContainer.copy(alpha = 0.85f),
                         focusedColor = accent,
                         modifier = Modifier.fillMaxWidth().height(KeyboardKeyHeight)
                     ) {
@@ -1882,7 +1954,9 @@ private fun AdjustmentPill(
     containerColor: Color,
     onDecrease: () -> Unit,
     onIncrease: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    decreaseEnabled: Boolean = true,
+    increaseEnabled: Boolean = true
 ) {
     Row(
         modifier = modifier
@@ -1894,11 +1968,12 @@ private fun AdjustmentPill(
     ) {
         KeypadButton(
             onClick = onDecrease,
+            enabled = decreaseEnabled,
             backgroundColor = Color.Transparent,
             focusedColor = Color.White.copy(alpha = 0.3f),
             modifier = Modifier.size(30.dp)
         ) {
-            Icon(Icons.Filled.Remove, contentDescription = "Decrease", tint = Color.White, modifier = Modifier.size(14.dp))
+            Icon(Icons.Filled.Remove, contentDescription = "Decrease", tint = if (decreaseEnabled) Color.White else Color.White.copy(alpha = 0.3f), modifier = Modifier.size(14.dp))
         }
 
         Text(
@@ -1910,11 +1985,12 @@ private fun AdjustmentPill(
 
         KeypadButton(
             onClick = onIncrease,
+            enabled = increaseEnabled,
             backgroundColor = Color.Transparent,
             focusedColor = Color.White.copy(alpha = 0.3f),
             modifier = Modifier.size(30.dp)
         ) {
-            Icon(Icons.Filled.Add, contentDescription = "Increase", tint = Color.White, modifier = Modifier.size(14.dp))
+            Icon(Icons.Filled.Add, contentDescription = "Increase", tint = if (increaseEnabled) Color.White else Color.White.copy(alpha = 0.3f), modifier = Modifier.size(14.dp))
         }
     }
 }
@@ -1927,10 +2003,12 @@ private fun DigitKey(
     modifier: Modifier = Modifier,
     keyHeight: Dp? = 38.dp
 ) {
+    val primaryContainer = MaterialTheme.colorScheme.primaryContainer
+    val accent = MaterialTheme.colorScheme.primary
     KeypadButton(
         onClick = { onDigitPress(digit) },
-        backgroundColor = Color(0xFF0F3832).copy(alpha = 0.85f),
-        focusedColor = Color(0xFF2DD4BF),
+        backgroundColor = primaryContainer.copy(alpha = 0.85f),
+        focusedColor = accent,
         modifier = modifier
             .then(if (keyHeight != null) Modifier.height(keyHeight) else Modifier)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
@@ -1948,8 +2026,9 @@ private fun DigitKey(
 private fun KeypadButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    backgroundColor: Color = Color(0xFF0F3832).copy(alpha = 0.85f),
-    focusedColor: Color = Color(0xFFFBBF24),
+    backgroundColor: Color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
+    focusedColor: Color = MaterialTheme.colorScheme.primary,
+    enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val shape = RoundedCornerShape(10.dp)
@@ -1967,7 +2046,7 @@ private fun KeypadButton(
         label = "keypadScale"
     )
     val borderColor by animateColorAsState(
-        targetValue = if (isFocused) Color.White else Color(0xFF2DD4BF).copy(alpha = 0.3f),
+        targetValue = if (isFocused) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
         label = "keypadBorder"
     )
     val borderWidth by animateDpAsState(
@@ -1977,6 +2056,7 @@ private fun KeypadButton(
 
     Surface(
         onClick = onClick,
+        enabled = enabled,
         modifier = modifier
             .graphicsLayer(scaleX = focusScale, scaleY = focusScale)
             .then(
@@ -2059,7 +2139,7 @@ private fun QuickSearchDialog(
             },
             shape = if (isRightPanel) RoundedCornerShape(20.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
             color = Color(0xFF0F172A).copy(alpha = 0.96f),
-            border = BorderStroke(1.5.dp, Color(0xFF2DD4BF).copy(alpha = 0.4f)),
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
             tonalElevation = 16.dp
         ) {
             Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
@@ -2111,7 +2191,7 @@ private fun QuickSearchDialog(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(Color(0xFF1E293B))
-                                .border(1.dp, Color(0xFF2DD4BF).copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -2128,7 +2208,7 @@ private fun QuickSearchDialog(
                                     text = "${song.displaySinger()} • #${song.displayCode()}",
                                     style = MaterialTheme.typography.bodySmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF2DD4BF),
+                                    color = MaterialTheme.colorScheme.primary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -2244,7 +2324,7 @@ private fun ReservationListDialog(
             },
             shape = if (isRightPanel) RoundedCornerShape(20.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
             color = Color(0xFF0F172A).copy(alpha = 0.96f),
-            border = BorderStroke(1.5.dp, Color(0xFF2DD4BF).copy(alpha = 0.4f)),
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
             tonalElevation = 16.dp
         ) {
             Column(
@@ -2304,7 +2384,7 @@ private fun ReservationListDialog(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(Color(0xFF1E293B))
-                                    .border(1.dp, Color(0xFF2DD4BF).copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                                    .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -2328,7 +2408,7 @@ private fun ReservationListDialog(
                                     Text(
                                         text = "${song.displaySinger()} • #${song.displayCode()}",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = Color(0xFF2DD4BF),
+                                        color = MaterialTheme.colorScheme.primary,
                                         fontWeight = FontWeight.Bold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -2466,28 +2546,12 @@ private fun LyricStack(lines: List<LyricLine>, lineIndex: Int) {
             label = "currentLine"
         ) { text ->
             if (text.isNotBlank()) {
-                val strokeStyle = baseStyle.copy(drawStyle = Stroke(width = outlinePx))
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = text,
-                        style = strokeStyle,
-                        color = Color.White,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        softWrap = false
-                    )
-                    Text(
-                        text = text,
-                        style = baseStyle,
-                        color = KaraokeHighlight,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        softWrap = false
-                    )
-                }
+                ShrinkToFitText(
+                    text = text,
+                    baseStyle = baseStyle,
+                    fillColor = KaraokeHighlight,
+                    outlinePx = outlinePx
+                )
             }
         }
         Spacer(Modifier.height(18.dp))
@@ -2502,7 +2566,8 @@ private fun KaraokeStack(
     posMs: Double,
     currentTick: Long,
     fillColor: Color,
-    fontSizeSp: Float
+    fontSizeSp: Float,
+    maxLines: Int = 1
 ) {
     val context = LocalContext.current
     val fontFamily = rememberLyricFontFamily()
@@ -2517,6 +2582,89 @@ private fun KaraokeStack(
             lineHeight = (fontSizeSp * 1.15f).sp,
             textAlign = TextAlign.Center
         )
+    }
+
+    // Portrait: two fixed slots that reserve the height of [maxLines] lines so changing the next
+    // phrase never shifts the line being sung, and a long phrase keeps its font size instead of
+    // being squeezed. The wipe alternates between the top and bottom slot each phrase.
+    if (maxLines > 1) {
+        val current = lines.getOrNull(lineIndex)
+        val next = lines.getOrNull(lineIndex + 1)
+        val isEven = lineIndex % 2 == 0
+        val topLine = if (isEven) current else next
+        val bottomLine = if (isEven) next else current
+        val lineHeight = with(LocalDensity.current) { (fontSizeSp * 1.15f).sp.toDp() }
+        val reservedSlot = lineHeight * maxLines + 2.dp * (maxLines - 1)
+
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val available = maxHeight
+            val slot = if (available.value.isFinite() && available.value > 0f) {
+                minOf(reservedSlot, (available - 16.dp) / 2).coerceAtLeast(0.dp)
+            } else {
+                reservedSlot
+            }
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(slot),
+                    contentAlignment = Alignment.BottomCenter
+                ) {
+                    if (topLine != null) {
+                        if (isEven) {
+                            KaraokeLine(
+                                line = topLine,
+                                posMs = posMs,
+                                currentTick = currentTick,
+                                fillColor = fillColor,
+                                baseStyle = baseStyle,
+                                outlinePx = outlinePx,
+                                maxLines = maxLines
+                            )
+                        } else {
+                            KaraokeUpcomingLine(
+                                line = topLine,
+                                baseStyle = baseStyle,
+                                outlinePx = outlinePx,
+                                maxLines = maxLines
+                            )
+                        }
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(slot),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    if (bottomLine != null) {
+                        if (!isEven) {
+                            KaraokeLine(
+                                line = bottomLine,
+                                posMs = posMs,
+                                currentTick = currentTick,
+                                fillColor = fillColor,
+                                baseStyle = baseStyle,
+                                outlinePx = outlinePx,
+                                maxLines = maxLines
+                            )
+                        } else {
+                            KaraokeUpcomingLine(
+                                line = bottomLine,
+                                baseStyle = baseStyle,
+                                outlinePx = outlinePx,
+                                maxLines = maxLines
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        return
     }
 
     val isEven = lineIndex % 2 == 0
@@ -2535,20 +2683,22 @@ private fun KaraokeStack(
                     currentTick = currentTick,
                     fillColor = fillColor,
                     baseStyle = baseStyle,
-                    outlinePx = outlinePx
+                    outlinePx = outlinePx,
+                    maxLines = maxLines
                 )
             } else {
                 KaraokeUpcomingLine(
                     line = topLine,
                     baseStyle = baseStyle,
-                    outlinePx = outlinePx
+                    outlinePx = outlinePx,
+                    maxLines = maxLines
                 )
             }
         } else {
             Spacer(Modifier.height(fontSizeSp.dp))
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(if (maxLines > 1) 12.dp else 24.dp))
 
         if (bottomLine != null) {
             if (!isEven) {
@@ -2558,13 +2708,15 @@ private fun KaraokeStack(
                     currentTick = currentTick,
                     fillColor = fillColor,
                     baseStyle = baseStyle,
-                    outlinePx = outlinePx
+                    outlinePx = outlinePx,
+                    maxLines = maxLines
                 )
             } else {
                 KaraokeUpcomingLine(
                     line = bottomLine,
                     baseStyle = baseStyle,
-                    outlinePx = outlinePx
+                    outlinePx = outlinePx,
+                    maxLines = maxLines
                 )
             }
         } else {
@@ -2573,12 +2725,63 @@ private fun KaraokeStack(
     }
 }
 
+/**
+ * Single, unfilled karaoke line shown during the 4·3·2·1 count-in so the singer can see the
+ * phrase that is about to be wiped. Rendered directly below the countdown dots.
+ */
+@Composable
+private fun CountdownUpcomingLine(
+    line: LyricLine,
+    posMs: Double,
+    currentTick: Long,
+    fontSizeSp: Float,
+    maxLines: Int = 1
+) {
+    val context = LocalContext.current
+    val fontFamily = rememberLyricFontFamily()
+    val outlineDp = remember(context) { LyricSettings.getOutlineThickness(context) }
+    val outlinePx = with(LocalDensity.current) { outlineDp.dp.toPx() }
+    val baseStyle = remember(fontFamily, fontSizeSp) {
+        TextStyle(
+            fontFamily = fontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = fontSizeSp.sp,
+            lineHeight = (fontSizeSp * 1.15f).sp,
+            textAlign = TextAlign.Center
+        )
+    }
+
+    KaraokeLine(
+        line = line,
+        posMs = posMs,
+        currentTick = currentTick,
+        fillColor = KaraokeHighlight,
+        baseStyle = baseStyle,
+        outlinePx = outlinePx,
+        maxLines = maxLines
+    )
+}
+
 @Composable
 private fun KaraokeUpcomingLine(
     line: LyricLine,
     baseStyle: TextStyle,
-    outlinePx: Float
+    outlinePx: Float,
+    maxLines: Int = 1
 ) {
+    if (maxLines > 1) {
+        WrappedKaraokeLine(
+            line = line,
+            posMs = 0.0,
+            currentTick = 0L,
+            baseStyle = baseStyle,
+            outlinePx = outlinePx,
+            fillColor = Color.White,
+            filled = false,
+            maxLines = maxLines
+        )
+        return
+    }
     val measurer = rememberTextMeasurer()
     val text = line.fullText()
     if (text.isBlank()) return
@@ -2596,7 +2799,7 @@ private fun KaraokeUpcomingLine(
     ) {
         val maxWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
         val scale = if (measuredTotal > 0f) {
-            (maxWidthPx / measuredTotal).coerceIn(0.35f, 1f)
+            (maxWidthPx / measuredTotal).coerceIn(MIN_LYRIC_SCALE, 1f)
         } else {
             1f
         }
@@ -2624,8 +2827,22 @@ private fun KaraokeLine(
     currentTick: Long,
     fillColor: Color,
     baseStyle: TextStyle,
-    outlinePx: Float
+    outlinePx: Float,
+    maxLines: Int = 1
 ) {
+    if (maxLines > 1) {
+        WrappedKaraokeLine(
+            line = line,
+            posMs = posMs,
+            currentTick = currentTick,
+            baseStyle = baseStyle,
+            outlinePx = outlinePx,
+            fillColor = fillColor,
+            filled = true,
+            maxLines = maxLines
+        )
+        return
+    }
     val measurer = rememberTextMeasurer()
     val text = line.fullText()
     val fragments = line.fragments
@@ -2643,7 +2860,7 @@ private fun KaraokeLine(
     ) {
         val maxWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
         val scale = if (measuredTotal > 0f) {
-            (maxWidthPx / measuredTotal).coerceIn(0.35f, 1f)
+            (maxWidthPx / measuredTotal).coerceIn(MIN_LYRIC_SCALE, 1f)
         } else {
             1f
         }
@@ -2675,39 +2892,153 @@ private fun KaraokeLine(
     }
 }
 
+/**
+ * Portrait renderer: wraps a lyric line across up to [maxLines] visual lines so the font size is
+ * preserved instead of being squeezed onto a single line. Each visual line is wiped independently,
+ * and the wipe proceeds line by line (line 1 fills, then line 2, ...) following the same melody
+ * timing as the single-line renderer.
+ */
+@Composable
+private fun WrappedKaraokeLine(
+    line: LyricLine,
+    posMs: Double,
+    currentTick: Long,
+    baseStyle: TextStyle,
+    outlinePx: Float,
+    fillColor: Color,
+    filled: Boolean,
+    maxLines: Int
+) {
+    val measurer = rememberTextMeasurer()
+    val fragments = line.fragments
+    val text = line.fullText()
+    if (text.isBlank()) return
+
+    val widths = remember(measurer, text, baseStyle) {
+        fragments.map { measurer.measure(it.text, baseStyle, softWrap = false).size.width.toFloat() }
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        val maxWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
+        val scale = if (widths.isEmpty()) 1f else fitScaleForLines(widths, maxWidthPx, maxLines)
+        val scaledWidths = if (scale < 1f) widths.map { it * scale } else widths
+        val style = if (scale < 1f) {
+            baseStyle.copy(
+                fontSize = (baseStyle.fontSize.value * scale).sp,
+                lineHeight = (baseStyle.lineHeight.value * scale).sp
+            )
+        } else {
+            baseStyle
+        }
+        val strokeStyle = style.copy(drawStyle = Stroke(width = outlinePx))
+        val ranges = wrapFragmentRanges(scaledWidths, maxWidthPx, maxLines)
+        val globalFill = if (filled) {
+            karaokeProgressPx(line, posMs, scaledWidths, currentTick)
+        } else {
+            0f
+        }
+
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            var offset = 0f
+            for (range in ranges) {
+                var lineWidth = 0f
+                for (idx in range) lineWidth += scaledWidths[idx]
+                val localFill = (globalFill - offset).coerceIn(0f, lineWidth)
+                offset += lineWidth
+
+                val segment = buildString {
+                    for (idx in range) append(fragments[idx].text)
+                }
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box {
+                        Text(segment, style = strokeStyle, color = Color.Black, maxLines = 1, softWrap = false)
+                        Text(segment, style = style, color = Color.White, maxLines = 1, softWrap = false)
+                        if (localFill > 0f) {
+                            Box(
+                                modifier = Modifier.drawWithContent {
+                                    clipRect(right = localFill.coerceIn(0f, size.width)) {
+                                        this@drawWithContent.drawContent()
+                                    }
+                                }
+                            ) {
+                                Text(segment, style = strokeStyle, color = Color.White, maxLines = 1, softWrap = false)
+                                Text(segment, style = style, color = fillColor, maxLines = 1, softWrap = false)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DimLine(text: String, baseStyle: TextStyle, outlinePx: Float) {
     if (text.isBlank()) {
         Box(Modifier.height(12.dp))
         return
     }
-    val strokeStyle = baseStyle.copy(
-        fontSize = (baseStyle.fontSize.value * 0.75f).sp,
-        drawStyle = Stroke(width = outlinePx)
+    val dimBase = baseStyle.copy(fontSize = (baseStyle.fontSize.value * 0.75f).sp)
+    ShrinkToFitText(
+        text = text,
+        baseStyle = dimBase,
+        fillColor = Color.White.copy(alpha = 0.6f),
+        outlinePx = outlinePx
     )
-    val dimStyle = baseStyle.copy(
-        fontSize = (baseStyle.fontSize.value * 0.75f).sp
-    )
-    Box(
+}
+
+/**
+ * Renders [text] on a single line, shrinking the font (down to [MIN_LYRIC_SCALE]) so the whole
+ * phrase is always visible instead of being clipped or ellipsized. The font is never enlarged.
+ */
+@Composable
+private fun ShrinkToFitText(
+    text: String,
+    baseStyle: TextStyle,
+    fillColor: Color,
+    outlinePx: Float,
+    minScale: Float = MIN_LYRIC_SCALE
+) {
+    if (text.isBlank()) return
+    val measurer = rememberTextMeasurer()
+    val measuredWidth = remember(measurer, text, baseStyle) {
+        measurer.measure(text, baseStyle, softWrap = false).size.width.toFloat()
+    }
+    BoxWithConstraints(
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = text,
-            style = strokeStyle,
-            color = Color.Black,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            softWrap = false
-        )
-        Text(
-            text = text,
-            style = dimStyle,
-            color = Color.White.copy(alpha = 0.6f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            softWrap = false
-        )
+        val maxWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
+        val scale = if (measuredWidth > 0f && maxWidthPx > 0f) {
+            (maxWidthPx / measuredWidth).coerceIn(minScale, 1f)
+        } else {
+            1f
+        }
+        val style = if (scale < 1f) {
+            val scaled = baseStyle.copy(fontSize = (baseStyle.fontSize.value * scale).sp)
+            if (baseStyle.lineHeight.isSp) {
+                scaled.copy(lineHeight = (baseStyle.lineHeight.value * scale).sp)
+            } else {
+                scaled
+            }
+        } else {
+            baseStyle
+        }
+        val strokeStyle = style.copy(drawStyle = Stroke(width = outlinePx))
+        Box {
+            Text(text, style = strokeStyle, color = Color.Black, maxLines = 1, softWrap = false)
+            Text(text, style = style, color = fillColor, maxLines = 1, softWrap = false)
+        }
     }
 }
 
@@ -2787,8 +3118,9 @@ private fun karaokeProgressPx(
 private fun rememberLyricFontFamily(): FontFamily {
     val context = LocalContext.current
     val customPath = LyricSettings.getCustomFontPath(context)
+    val fontType = LyricSettings.getFontType(context)
 
-    return remember(customPath) {
+    return remember(customPath, fontType) {
         if (!customPath.isNullAndBlank()) {
             val file = File(customPath)
             if (file.isFile) {
@@ -2799,7 +3131,7 @@ private fun rememberLyricFontFamily(): FontFamily {
                 }
             }
         }
-        FontFamily.Default
+        lyricFontFamily(fontType)
     }
 }
 
@@ -2817,6 +3149,16 @@ private fun QrCodeDialog(
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isTv = rememberIsTvDevice()
     val isRightPanel = isLandscape || isTv
+
+    val closeFocusRequester = remember { FocusRequester() }
+    var isCloseFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(100L)
+        try {
+            closeFocusRequester.requestFocus()
+        } catch (_: Exception) {}
+    }
 
     Box(
         modifier = Modifier
@@ -2842,7 +3184,7 @@ private fun QrCodeDialog(
             },
             shape = if (isRightPanel) RoundedCornerShape(20.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 16.dp, bottomEnd = 16.dp),
             color = Color(0xFF0F172A).copy(alpha = 0.96f),
-            border = BorderStroke(1.5.dp, Color(0xFF2DD4BF).copy(alpha = 0.4f)),
+            border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
             tonalElevation = 16.dp
         ) {
             Column(
@@ -2867,11 +3209,19 @@ private fun QrCodeDialog(
                     IconButton(
                         onClick = onDismiss,
                         modifier = Modifier
-                            .size(32.dp)
+                            .focusRequester(closeFocusRequester)
+                            .onFocusChanged { isCloseFocused = it.isFocused }
+                            .size(36.dp)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.15f))
+                            .background(if (isCloseFocused) Color(0xFFEF4444) else Color.White.copy(alpha = 0.2f))
+                            .then(if (isCloseFocused) Modifier.border(2.dp, Color.White, CircleShape) else Modifier)
                     ) {
-                        Icon(Icons.Filled.Clear, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Filled.Clear,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
 
@@ -2890,7 +3240,7 @@ private fun QrCodeDialog(
                         text = "Scan QR code on your phone to open web remote & song search",
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF2DD4BF),
+                        color = MaterialTheme.colorScheme.primary,
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(2.dp))
@@ -2989,6 +3339,55 @@ private fun BackgroundVideoPlayer(
 ) {
     val context = LocalContext.current
     val bgvMode = remember(context) { BgvSettings.getMode(context) }
+    val libraryRoot = remember(bgvDir) { bgvDir?.parentFile ?: File(LibraryRepository.DEFAULT_ROOT) }
+
+    if (bgvMode == BgvSettings.MODE_STATIC_PHOTO) {
+        val staticPath = remember(context) { BgvSettings.getStaticPhotoPath(context) }
+        val photos = remember(libraryRoot, bgvMode) {
+            val list = mutableListOf<File>()
+            val photoDir = BgvSettings.getBgPhotoDirectory(context, libraryRoot.absolutePath)
+            fun collect(f: File) {
+                if (f.isDirectory) {
+                    f.listFiles()?.forEach { collect(it) }
+                } else if (f.isFile) {
+                    val lower = f.name.lowercase()
+                    if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") || lower.endsWith(".webp")) {
+                        list.add(f)
+                    }
+                }
+            }
+            if (photoDir != null && photoDir.isDirectory) {
+                collect(photoDir)
+            }
+            list.sortedBy { it.name.lowercase() }
+        }
+
+        val activePhoto = remember(photos, staticPath, bgvIndex) {
+            if (photos.isNotEmpty()) {
+                val idx = if (staticPath.isNotBlank()) {
+                    val foundIdx = photos.indexOfFirst { it.absolutePath == staticPath }
+                    if (foundIdx >= 0) (foundIdx + bgvIndex) % photos.size else Math.abs(bgvIndex) % photos.size
+                } else {
+                    Math.abs(bgvIndex) % photos.size
+                }
+                photos[idx]
+            } else if (staticPath.isNotBlank() && File(staticPath).isFile) {
+                File(staticPath)
+            } else {
+                null
+            }
+        }
+
+        if (activePhoto != null && activePhoto.isFile) {
+            AsyncImage(
+                model = activePhoto,
+                contentDescription = "Static Background",
+                contentScale = ContentScale.Crop,
+                modifier = modifier.fillMaxSize()
+            )
+            return
+        }
+    }
 
     val videos = remember(bgvDir, bgvMode) {
         if (bgvMode != BgvSettings.MODE_VIDEOS || bgvDir == null || !bgvDir.isDirectory) emptyList()
@@ -3064,8 +3463,36 @@ private fun PlayerCenterContent(
     lineIndex: Int,
     lyricStyle: Int,
     isInstrumental: Boolean = false,
-    context: Context
+    inBreak: Boolean = false,
+    isPortrait: Boolean = false,
+    context: Context,
+    availableHeightDp: Dp? = null
 ) {
+    // In portrait a long phrase wraps onto extra lines (keeping the font size) instead of
+    // being squeezed onto one line. The user can pick 3 or 4 lines.
+    val portraitMaxLines = if (LyricSettings.getFourLinePortrait(context)) 4 else 3
+    val baseLyricFontSp = LyricSettings.getFontSizeLandscape(context)
+
+    // Portrait only: when the on-screen keypad (or another overlay) reduces the vertical space,
+    // shrink the lyric font so the wrapped phrase still fits in the reserved slots instead of
+    // being clipped. The scale never enlarges the font (capped at 1x).
+    val lyricFontSizeSp = if (isPortrait && availableHeightDp != null) {
+        val density = LocalDensity.current
+        val lineHeightSp = baseLyricFontSp * 1.15f
+        val naturalSlotDp = with(density) {
+            (lineHeightSp * portraitMaxLines + 2f * (portraitMaxLines - 1)).sp.toDp()
+        }
+        val naturalTotalDp = naturalSlotDp * 2
+        val usableDp = (availableHeightDp - 16.dp).coerceAtLeast(0.dp)
+        val scale = if (naturalTotalDp.value > 0f) {
+            (usableDp.value / naturalTotalDp.value).coerceIn(0.45f, 1f)
+        } else {
+            1f
+        }
+        baseLyricFontSp * scale
+    } else {
+        baseLyricFontSp
+    }
     val firstLineStart = lines.firstOrNull()?.startMs ?: 6000.0
     val showSongIntroCard = song.code != 0 && posMs < minOf(5000.0, firstLineStart - 300.0)
 
@@ -3075,6 +3502,10 @@ private fun PlayerCenterContent(
             posMs >= firstMs - 50.0 && posMs < cd.anchorMs
         }
     }
+    // While the 4·3·2·1 count-in is showing we replace the instrumental pill with the
+    // upcoming phrase so the singer can read it and be ready to sing.
+    val countdownLine = activeCountdown?.takeIf { it.pipMs.isNotEmpty() }
+    val upcomingLine = countdownLine?.lineIndex?.let { lines.getOrNull(it) }
 
     if (song.code == 0) {
         if (codeInput.isNotBlank()) {
@@ -3126,8 +3557,8 @@ private fun PlayerCenterContent(
                 Text(
                     text = "000000",
                     style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.8f)
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
@@ -3221,6 +3652,23 @@ private fun PlayerCenterContent(
                 } else {
                     Text("No lyrics", style = MaterialTheme.typography.titleLarge, color = Color.White)
                 }
+            } else if (upcomingLine != null) {
+                // Count-in is showing (e.g. right after an instrumental break): hide the
+                // pill and preview the phrase about to be wiped, right below the 4·3·2·1 dots.
+                CountdownUpcomingLine(
+                    line = upcomingLine,
+                    posMs = posMs,
+                    currentTick = currentTick,
+                    fontSizeSp = lyricFontSizeSp,
+                    maxLines = if (isPortrait) portraitMaxLines else 1
+                )
+            } else if (inBreak) {
+                Box(
+                    modifier = Modifier.scale(1.6f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    InstrumentalBadge()
+                }
             } else if (lyricStyle == LyricSettings.STYLE_KARAOKE) {
                 KaraokeStack(
                     lines = lines,
@@ -3228,7 +3676,8 @@ private fun PlayerCenterContent(
                     posMs = posMs,
                     currentTick = currentTick,
                     fillColor = KaraokeHighlight,
-                    fontSizeSp = LyricSettings.getFontSizeLandscape(context)
+                    fontSizeSp = lyricFontSizeSp,
+                    maxLines = if (isPortrait) portraitMaxLines else 1
                 )
             } else {
                 LyricStack(lines = lines, lineIndex = lineIndex)

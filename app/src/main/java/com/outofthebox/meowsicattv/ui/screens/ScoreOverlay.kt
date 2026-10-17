@@ -1,14 +1,13 @@
 package com.outofthebox.meowsicattv.ui.screens
 
 import android.content.Context
-import android.graphics.LinearGradient
 import android.graphics.Paint
-import android.graphics.Shader
-import android.graphics.Typeface
 import android.media.MediaPlayer
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -20,16 +19,20 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -44,8 +47,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -54,14 +59,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.res.ResourcesCompat
-import com.songhub.android.song.ScoreCalculator
-import com.songhub.android.storage.ScoreSettings
+import com.meowsicat.android.song.ScoreCalculator
+import com.meowsicat.android.storage.ScoreSettings
 import com.outofthebox.meowsicattv.R
 import kotlin.math.PI
 import kotlin.math.cos
@@ -80,6 +87,9 @@ private val BALLOON_COLORS = intArrayOf(
 private val BURST_COLORS = intArrayOf(
     0xFFFF0000.toLong().toInt(), 0xFFFFFFFF.toInt(), 0xFFFFD700.toLong().toInt(), 0xFF0000FF.toLong().toInt(), 0xFFFF69B4.toLong().toInt()
 )
+
+private val ScoreNumberFont = FontFamily(Font(R.font.score_number))
+private val ScoreGreetFont = FontFamily(Font(R.font.score_greet))
 
 private class Confetti {
     var x = 0f
@@ -128,15 +138,36 @@ private class ScoreOverlayState {
     val burstStars = ArrayList<BurstingStar>()
     val balloons = ArrayList<Balloon>()
     val likes = ArrayList<PoppingLike>()
-    var starCount = 0
 }
 
-private fun scoreColor(score: Int): Int = when {
-    score <= 60 -> 0xFFFF0000.toInt()
-    score <= 80 -> android.graphics.Color.rgb(255, 165, 0)
-    score <= 90 -> 0xFFFFFF00.toInt()
-    score <= 99 -> 0xFF00FF00.toInt()
-    else -> android.graphics.Color.parseColor("#FFD700")
+/** Number of stars (0..5) earned for a score — used by the modern star row. */
+private fun starCountForScore(score: Int): Int = when {
+    score >= 91 -> 5
+    score >= 81 -> 4
+    score >= 71 -> 3
+    score >= 61 -> 2
+    score >= 41 -> 1
+    else -> 0
+}
+
+private val ACCENT_GOLD = Color(0xFFFFC93C)
+private val ACCENT_GOLD_LIGHT = Color(0xFFFFF6D6)
+
+/** Accent colour for the reveal, graded by score band. */
+private fun accentFor(score: Int): Color = when {
+    score <= 60 -> Color(0xFFFF5252)
+    score <= 80 -> Color(0xFFFFB74D)
+    score <= 90 -> Color(0xFFFFE066)
+    score <= 99 -> Color(0xFF7DE87D)
+    else -> ACCENT_GOLD
+}
+
+private fun accentLightFor(score: Int): Color = when {
+    score <= 60 -> Color(0xFFFFB4AB)
+    score <= 80 -> Color(0xFFFFE0B2)
+    score <= 90 -> Color(0xFFFFF6C9)
+    score <= 99 -> Color(0xFFCCFFCC)
+    else -> ACCENT_GOLD_LIGHT
 }
 
 private fun fanfareRes(score: Int): Int = when {
@@ -225,15 +256,6 @@ private fun starAt(cx: Float, cy: Float, size: Float): Path {
     return path
 }
 
-private fun DrawScope.drawGroupStars(state: ScoreOverlayState, starCenterY: Float, size: Float) {
-    if (state.starCount <= 0) return
-    val spacing = size * 1.8f
-    val firstX = (this.size.width - (state.starCount - 1) * spacing) / 2f
-    for (i in 0 until state.starCount) {
-        drawPath(starAt(firstX + i * spacing, starCenterY, size), Color(0xFFFFEB3B))
-    }
-}
-
 private fun DrawScope.drawBalloon(b: Balloon) {
     val cx = b.x
     val cy = b.y + b.height / 2f
@@ -255,51 +277,106 @@ private fun DrawScope.drawBalloon(b: Balloon) {
     )
 }
 
-private fun scoreOutline(context: Context, textSize: Float): Paint {
-    val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    p.textAlign = Paint.Align.CENTER
-    p.textSize = textSize
-    p.style = Paint.Style.STROKE
-    p.color = android.graphics.Color.BLACK
-    p.strokeWidth = 8f
-    p.setShadowLayer(12f, 4f, 6f, 0x80000000.toInt())
-    p.typeface = ResourcesCompat.getFont(context, R.font.score_number) ?: Typeface.DEFAULT_BOLD
-    return p
+/**
+ * Modern animated "score dial": a glowing ring that sweeps to the achieved score with the
+ * big gradient number counting up inside it.
+ */
+@Composable
+private fun ScoreDial(
+    score: Int,
+    displayScore: Int,
+    arcReveal: Float,
+    accent: Color,
+    accentLight: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier.size(264.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val stroke = 22.dp.toPx()
+            val inset = stroke / 2f
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            val topLeft = Offset(inset, inset)
+
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(accent.copy(alpha = 0.22f), Color.Transparent),
+                    center = center,
+                    radius = size.minDimension / 2f
+                )
+            )
+
+            drawArc(
+                color = Color.White.copy(alpha = 0.10f),
+                startAngle = -90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round)
+            )
+
+            val sweep = 360f * (score.coerceIn(0, 100) / 100f) * arcReveal
+            if (sweep > 0f) {
+                drawArc(
+                    brush = Brush.linearGradient(
+                        colors = listOf(accentLight, accent),
+                        start = Offset(0f, 0f),
+                        end = Offset(size.width, size.height)
+                    ),
+                    startAngle = -90f,
+                    sweepAngle = sweep,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round)
+                )
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = "$displayScore",
+                style = TextStyle(
+                    fontFamily = ScoreNumberFont,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 88.sp,
+                    brush = Brush.linearGradient(listOf(accentLight, accent))
+                )
+            )
+            Text(
+                text = "OUT OF 100",
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 3.sp
+            )
+        }
+    }
 }
 
-private fun scoreFill(context: Context, textSize: Float, centerY: Float): Paint {
-    val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    p.textAlign = Paint.Align.CENTER
-    p.textSize = textSize
-    p.shader = LinearGradient(
-        0f, centerY - textSize / 0.8f, 0f, centerY + textSize / 4f,
-        intArrayOf(0xFFFFF9C4.toInt(), 0xFFFFD700.toInt(), 0xFFFFB300.toInt(), 0xFFFFD700.toInt(), 0xFFB8860B.toInt()),
-        floatArrayOf(0f, 0.4f, 0.5f, 0.6f, 1f),
-        Shader.TileMode.CLAMP
-    )
-    p.typeface = ResourcesCompat.getFont(context, R.font.score_number) ?: Typeface.DEFAULT_BOLD
-    return p
-}
-
-private fun messagePaint(context: Context, textSize: Float, color: Int): Paint {
-    val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    p.textAlign = Paint.Align.CENTER
-    p.textSize = textSize * 0.29f
-    p.color = color
-    p.typeface = ResourcesCompat.getFont(context, R.font.score_greet) ?: Typeface.DEFAULT_BOLD
-    return p
-}
-
-private fun messageOutline(context: Context, textSize: Float): Paint {
-    val p = Paint(Paint.ANTI_ALIAS_FLAG)
-    p.textAlign = Paint.Align.CENTER
-    p.textSize = textSize * 0.29f
-    p.style = Paint.Style.STROKE
-    p.color = android.graphics.Color.BLACK
-    p.strokeWidth = 4f
-    p.setShadowLayer(4f, 2f, 2f, 0x80000000.toInt())
-    p.typeface = ResourcesCompat.getFont(context, R.font.score_greet) ?: Typeface.DEFAULT_BOLD
-    return p
+@Composable
+private fun StarRating(score: Int, progress: Float, accent: Color) {
+    val count = starCountForScore(score)
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        for (i in 0 until 5) {
+            val earned = i < count
+            val fill = if (earned) (progress - i).coerceIn(0f, 1f) else 1f
+            Icon(
+                imageVector = Icons.Filled.Star,
+                contentDescription = null,
+                tint = if (earned) accent else Color.White.copy(alpha = 0.14f),
+                modifier = Modifier
+                    .size(38.dp)
+                    .graphicsLayer {
+                        if (earned) {
+                            val s = 0.35f + 0.65f * fill
+                            scaleX = s
+                            scaleY = s
+                            alpha = 0.2f + 0.8f * fill
+                        }
+                    }
+            )
+        }
+    }
 }
 
 @Composable
@@ -319,16 +396,46 @@ fun ScoreOverlay(
     var frameTick by remember { mutableLongStateOf(0L) }
     var activePlayer by remember { mutableStateOf<MediaPlayer?>(null) }
 
+    val accent = remember(score) { accentFor(score) }
+    val accentLight = remember(score) { accentLightFor(score) }
+
     val rootAlpha by animateFloatAsState(
         targetValue = if (revealed) 1f else 0f,
         animationSpec = tween(500),
         label = "scoreReveal"
     )
 
+    val contentEnter by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessLow),
+        label = "contentEnter"
+    )
+
+    val arcReveal by animateFloatAsState(
+        targetValue = if (revealed) 1f else 0f,
+        animationSpec = tween(1400, easing = CubicBezierEasing(0.22f, 0.61f, 0.36f, 1f)),
+        label = "arcReveal"
+    )
+
     val displayScore by animateIntAsState(
         targetValue = if (revealed) score else 0,
         animationSpec = tween(1500, easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)),
         label = "displayScore"
+    )
+
+    val starProgress by animateFloatAsState(
+        targetValue = if (feedbackStarted) starCountForScore(score).toFloat() else 0f,
+        animationSpec = tween(
+            durationMillis = (starCountForScore(score) * 220).coerceAtLeast(1),
+            easing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+        ),
+        label = "starProgress"
+    )
+
+    val messageAlpha by animateFloatAsState(
+        targetValue = if (feedbackStarted) 1f else 0f,
+        animationSpec = tween(600),
+        label = "messageAlpha"
     )
 
     DisposableEffect(Unit) {
@@ -367,14 +474,10 @@ fun ScoreOverlay(
         val size = screenSize(context)
         when {
             score <= 60 -> Unit
-            score <= 80 -> {
-                state.starCount =
-                    if (score <= 70) 1 else if (score <= 75) 2 else 3
-            }
+            score <= 80 -> Unit
             score <= 90 -> seedLikes(state, random)
             score <= 99 -> seedConfetti(state, random, size)
             else -> {
-                state.starCount = 3
                 seedBurst(state, random, size.width / 2f, size.height / 2f)
                 seedBalloons(state, random, size)
             }
@@ -448,132 +551,149 @@ fun ScoreOverlay(
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer { alpha = rootAlpha }
-            .background(Color(0xCC000000))
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(Color(0xFF1B1430), Color(0xFF07060D))
+                )
+            )
+            .background(Color(0x99000000))
             .pointerInput(Unit) {
                 detectTapGestures(onTap = { onDismiss() })
             }
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
-            Canvas(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                frameTick
-                val w = this.size.width
-                val h = this.size.height
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            frameTick
+            val w = this.size.width
+            val h = this.size.height
 
-                state.confetti.forEach { c ->
+            state.confetti.forEach { c ->
+                withTransform({
+                    translate(c.x, c.y)
+                    rotate(c.rotation)
+                }) {
+                    drawRect(
+                        color = Color(c.color),
+                        topLeft = Offset(-c.size / 2f, -c.size / 2f),
+                        size = Size(c.size, c.size)
+                    )
+                }
+            }
+
+            state.burstStars.forEach { s ->
+                if (s.delay <= 0 && s.alpha > 0) {
+                    drawPath(starAt(s.x, s.y, s.size), Color(s.color).copy(alpha = s.alpha / 255f))
+                }
+            }
+
+            state.balloons.forEach { b ->
+                if (b.delay <= 0) drawBalloon(b)
+            }
+
+            state.likes.forEach { l ->
+                if (l.delay <= 0 && l.alpha > 0) {
                     withTransform({
-                        translate(c.x, c.y)
-                        rotate(c.rotation)
+                        translate(l.x * w, l.y * h)
+                        scale(l.scale, l.scale)
                     }) {
-                        drawRect(
-                            color = Color(c.color),
-                            topLeft = Offset(-c.size / 2f, -c.size / 2f),
-                            size = Size(c.size, c.size)
-                        )
-                    }
-                }
-
-                state.burstStars.forEach { s ->
-                    if (s.delay <= 0 && s.alpha > 0) {
-                        drawPath(starAt(s.x, s.y, s.size), Color(s.color).copy(alpha = s.alpha / 255f))
-                    }
-                }
-
-                state.balloons.forEach { b ->
-                    if (b.delay <= 0) drawBalloon(b)
-                }
-
-                state.likes.forEach { l ->
-                    if (l.delay <= 0 && l.alpha > 0) {
-                        withTransform({
-                            translate(l.x * w, l.y * h)
-                            scale(l.scale, l.scale)
-                        }) {
-                            drawIntoCanvas { canvas ->
-                                val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-                                textPaint.textAlign = Paint.Align.CENTER
-                                textPaint.textSize = 60.sp.toPx()
-                                textPaint.alpha = l.alpha
-                                canvas.nativeCanvas.drawText("\uD83D\uDC4D", 0f, 0f, textPaint)
-                            }
+                        drawIntoCanvas { canvas ->
+                            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+                            textPaint.textAlign = Paint.Align.CENTER
+                            textPaint.textSize = 60.sp.toPx()
+                            textPaint.alpha = l.alpha
+                            canvas.nativeCanvas.drawText("\uD83D\uDC4D", 0f, 0f, textPaint)
                         }
                     }
                 }
-
-                val scoreY = h * 0.28f
-                val textSize = 130.sp.toPx().coerceAtMost(h * 0.22f)
-                val outline = scoreOutline(context, textSize)
-                val fill = scoreFill(context, textSize, scoreY)
-
-                if (state.starCount > 0) {
-                    drawGroupStars(state, scoreY - textSize / 2f - 60.dp.toPx(), 40.dp.toPx())
-                }
-
-                val scoreStr = "$displayScore"
-                val baseline = scoreY + textSize / 2f
-                val cx = w / 2f + shakeX
-                drawIntoCanvas { canvas ->
-                    val native = canvas.nativeCanvas
-                    native.drawText(scoreStr, cx, baseline, outline)
-                    native.drawText(scoreStr, cx, baseline, fill)
-                }
-
-                if (feedbackStarted) {
-                    val msg = ScoreCalculator.getMessageForScore(score)
-                    val msgPaint = messagePaint(context, textSize, scoreColor(score))
-                    val msgOutline = messageOutline(context, textSize)
-                    val msgY = baseline + textSize / 2f + 40.dp.toPx()
-                    drawIntoCanvas { canvas ->
-                        val native = canvas.nativeCanvas
-                        native.drawText(msg, w / 2f, msgY, msgOutline)
-                        native.drawText(msg, w / 2f, msgY, msgPaint)
-                    }
-                }
             }
+        }
 
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = songTitle,
-                    color = Color.White.copy(alpha = 0.85f),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center
-                )
-                Text(
-                    text = songSinger,
-                    color = Color.White.copy(alpha = 0.55f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center
-                )
-            }
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(top = 44.dp, start = 32.dp, end = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = songTitle,
+                color = Color.White.copy(alpha = 0.9f),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                text = songSinger,
+                color = Color.White.copy(alpha = 0.55f),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center
+            )
+        }
 
-            Row(
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .graphicsLayer {
+                    translationX = shakeX
+                    val s = 0.86f + 0.14f * contentEnter
+                    scaleX = s
+                    scaleY = s
+                    alpha = contentEnter
+                },
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            ScoreDial(
+                score = score,
+                displayScore = displayScore,
+                arcReveal = arcReveal,
+                accent = accent,
+                accentLight = accentLight
+            )
+            Spacer(Modifier.height(22.dp))
+            StarRating(score = score, progress = starProgress, accent = accent)
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = ScoreCalculator.getMessageForScore(score),
+                color = accentLight,
+                fontFamily = ScoreGreetFont,
+                fontSize = 24.sp,
+                textAlign = TextAlign.Center,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(vertical = 40.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+                    .padding(horizontal = 24.dp)
+                    .graphicsLayer { alpha = messageAlpha }
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(vertical = 40.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(
+                onClick = onSingAgain,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = accent,
+                    contentColor = Color(0xFF1B1430)
+                )
             ) {
-                Button(onClick = onSingAgain) {
-                    Icon(Icons.Filled.Refresh, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Sing Again")
-                }
-                Spacer(Modifier.width(20.dp))
-                TextButton(onClick = onDismiss) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("Close")
-                }
+                Icon(Icons.Filled.Refresh, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Sing Again", fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.width(20.dp))
+            OutlinedButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Close")
             }
         }
     }

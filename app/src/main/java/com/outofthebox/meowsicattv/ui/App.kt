@@ -46,15 +46,28 @@ sealed interface Screen {
 @Composable
 fun App(
     modifier: Modifier = Modifier,
-    contentRoot: String = LibraryRepository.DEFAULT_ROOT,
+    contentRoot: String? = null,
     isInPipMode: Boolean = false,
     isPipSupported: Boolean = false,
     onEnterPip: () -> Unit = {},
-    onPlaybackStateChanged: (Boolean) -> Unit = {}
+    onPlayerStateChanged: (playing: Boolean, inPlayerScreen: Boolean) -> Unit = { _, _ -> },
+    onThemeChanged: (Int) -> Unit = {}
 ) {
-    var rootPath by remember { mutableStateOf(contentRoot) }
+    val context = LocalContext.current
+    var rootPath by remember {
+        mutableStateOf(
+            contentRoot?.takeIf { it.isNotBlank() } ?: LibraryRepository.getSavedRoot(context)
+        )
+    }
     var refreshKey by remember { mutableStateOf(0) }
+    var isRefreshing by remember { mutableStateOf(false) }
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var isPlayingState by remember { mutableStateOf(false) }
+
+    val inPlayerScreen = screen is Screen.Player
+    LaunchedEffect(inPlayerScreen, isPlayingState) {
+        onPlayerStateChanged(isPlayingState, inPlayerScreen)
+    }
 
     var isLibraryLoading by remember { mutableStateOf(true) }
     val libraryState by produceState<LibraryRepository.Library>(
@@ -64,16 +77,21 @@ fun App(
     ) {
         isLibraryLoading = true
         value = withContext(Dispatchers.IO) {
-            LibraryRepository.load(File(rootPath))
+            LibraryRepository.load(File(rootPath), forceReload = refreshKey > 0)
         }
         isLibraryLoading = false
+        isRefreshing = false
+    }
+
+    val handleRefreshLibrary: () -> Unit = {
+        isRefreshing = true
+        refreshKey++
     }
 
     BackHandler(enabled = screen !is Screen.Home) {
         screen = Screen.Home
     }
 
-    val context = LocalContext.current
     LaunchedEffect(libraryState) {
         if (libraryState.songs.isNotEmpty()) {
             WebServerManager.start(context, libraryState)
@@ -98,6 +116,8 @@ fun App(
                 is Screen.Home -> HomeScreen(
                     library = libraryState,
                     isLoading = isLibraryLoading,
+                    isRefreshing = isRefreshing,
+                    onRefreshLibrary = handleRefreshLibrary,
                     onOpenSongs = { screen = Screen.Songs() },
                     onOpenPlayer = { screen = Screen.Player(SongItem.placeholder(), target) },
                     onOpenArtists = { screen = Screen.Artists },
@@ -117,6 +137,8 @@ fun App(
 
                 is Screen.Songs -> SongsScreen(
                     library = libraryState,
+                    isRefreshing = isRefreshing,
+                    onRefreshLibrary = handleRefreshLibrary,
                     onBack = { screen = Screen.Home },
                     onOpen = { song -> screen = Screen.Player(song = song, back = target) },
                     onPlayAll = { firstSong, queue -> screen = Screen.Player(song = firstSong, back = target, initialQueue = queue) },
@@ -147,16 +169,21 @@ fun App(
                     isInPipMode = isInPipMode,
                     isPipSupported = isPipSupported,
                     onEnterPip = onEnterPip,
-                    onPlaybackStateChanged = onPlaybackStateChanged
+                    onPlaybackStateChanged = { playing -> isPlayingState = playing }
                 )
 
                 is Screen.Settings -> SettingsScreen(
                     currentRoot = rootPath,
                     onSave = { newRoot ->
-                        rootPath = newRoot
-                        refreshKey++
+                        val normalized = newRoot.trim()
+                        if (normalized.isNotBlank()) {
+                            LibraryRepository.setSavedRoot(context, normalized)
+                            rootPath = normalized
+                            refreshKey++
+                        }
                         screen = Screen.Home
                     },
+                    onThemeChanged = onThemeChanged,
                     onBack = { screen = Screen.Home }
                 )
 

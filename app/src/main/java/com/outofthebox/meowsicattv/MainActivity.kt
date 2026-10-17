@@ -43,6 +43,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import com.meowsicat.android.storage.BehaviorSettings
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,7 +71,12 @@ import com.outofthebox.meowsicattv.ui.theme.MeowsiCatTheme
 class MainActivity : ComponentActivity() {
 
     private val isInPipModeState = mutableStateOf(false)
-    private var isPlayingState = false
+    private var isInPlayerScreenState = false
+
+    // Picture-in-picture is only allowed while the Player screen is on top. Leaving while a song
+    // plays on any other screen must not drop the app into PIP.
+    private val canEnterPip: Boolean
+        get() = isInPlayerScreenState
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,7 +88,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val isInPipMode by isInPipModeState
-            MeowsiCatTheme {
+            val context = LocalContext.current
+            var appTheme by remember { mutableIntStateOf(BehaviorSettings.getAppTheme(context)) }
+
+            MeowsiCatTheme(appTheme = appTheme) {
                 AppGateway(
                     appName = getString(R.string.app_name),
                     onRequestPermission = { promptStoragePermission() },
@@ -89,9 +99,12 @@ class MainActivity : ComponentActivity() {
                     isInPipMode = isInPipMode,
                     isPipSupported = isPipSupported() && isPipAllowed(),
                     onEnterPip = { enterPip() },
-                    onPlaybackStateChanged = { playing ->
-                        isPlayingState = playing
-                        updatePipParams(playing)
+                    onPlayerStateChanged = { _, inPlayerScreen ->
+                        isInPlayerScreenState = inPlayerScreen
+                        updatePipParams()
+                    },
+                    onThemeChanged = { newTheme ->
+                        appTheme = newTheme
                     }
                 )
             }
@@ -123,7 +136,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (isPlayingState && isPipSupported() && isPipAllowed()) {
+        if (canEnterPip && isPipSupported() && isPipAllowed()) {
             enterPip()
         }
     }
@@ -164,7 +177,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun enterPip() {
-        if (isPipSupported() && isPipAllowed()) {
+        if (canEnterPip && isPipSupported() && isPipAllowed()) {
             try {
                 val params = PictureInPictureParams.Builder()
                     .setAspectRatio(Rational(16, 9))
@@ -176,11 +189,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun updatePipParams(playing: Boolean) {
+    private fun updatePipParams() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && isPipSupported()) {
             try {
                 val params = PictureInPictureParams.Builder()
-                    .setAutoEnterEnabled(playing)
+                    .setAutoEnterEnabled(canEnterPip)
                     .setAspectRatio(Rational(16, 9))
                     .build()
                 setPictureInPictureParams(params)
@@ -236,7 +249,8 @@ private fun AppGateway(
     isInPipMode: Boolean,
     isPipSupported: Boolean,
     onEnterPip: () -> Unit,
-    onPlaybackStateChanged: (Boolean) -> Unit
+    onPlayerStateChanged: (playing: Boolean, inPlayerScreen: Boolean) -> Unit,
+    onThemeChanged: (Int) -> Unit = {}
 ) {
     var granted by remember { mutableStateOf(hasAccess()) }
     var showSplash by remember { mutableStateOf(true) }
@@ -276,7 +290,8 @@ private fun AppGateway(
                     isInPipMode = isInPipMode,
                     isPipSupported = isPipSupported,
                     onEnterPip = onEnterPip,
-                    onPlaybackStateChanged = onPlaybackStateChanged
+                    onPlayerStateChanged = onPlayerStateChanged,
+                    onThemeChanged = onThemeChanged
                 )
             }
         }

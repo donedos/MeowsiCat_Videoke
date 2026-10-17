@@ -1,13 +1,14 @@
 package com.outofthebox.meowsicattv.data
 
+import android.util.Log
 import com.songhub.android.database.NativeLib
-import com.songhub.android.model.CountdownGroup
-import com.songhub.android.model.Fragment
-import com.songhub.android.model.LyricLine
-import com.songhub.android.parser.CountdownGrouper
-import com.songhub.android.parser.LineBuilder
-import com.songhub.android.parser.MidiParser
-import com.songhub.android.parser.TempoUtils
+import com.meowsicat.android.model.CountdownGroup
+import com.meowsicat.android.model.Fragment
+import com.meowsicat.android.model.LyricLine
+import com.meowsicat.android.parser.CountdownGrouper
+import com.meowsicat.android.parser.LineBuilder
+import com.meowsicat.android.parser.MidiParser
+import com.meowsicat.android.parser.TempoUtils
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.concurrent.ConcurrentHashMap
@@ -40,7 +41,9 @@ object LyricLoader {
         val totalMs: Double = 0.0,
         val error: String? = null,
         /** True when the MIDI parsed cleanly but carries no vocal lyric events (instrumental). */
-        val instrumental: Boolean = false
+        val instrumental: Boolean = false,
+        /** Interior windows where the music plays but nobody sings (mid-song instrumental breaks). */
+        val instrumentalBreaks: List<MsSpan> = emptyList()
     )
 
     suspend fun load(song: SongItem, wipeChannel: Int = 0): Parsed = withContext(Dispatchers.IO) {
@@ -79,13 +82,26 @@ object LyricLoader {
                 emptyList()
             }
             val totalMs = lines.maxOfOrNull { it.endMs } ?: 0.0
+            val breaks = if (result.lyricEventsTicks.isEmpty()) {
+                emptyList()
+            } else {
+                InstrumentalBreaks.detect(lines, result.noteRunsByChannel, tempoMap, ppqn)
+            }
+            if (breaks.isNotEmpty()) {
+                Log.d(
+                    "LyricLoader",
+                    "Instrumental breaks for ${song.code} \"${song.title}\": " +
+                        breaks.joinToString { "@${it.startMs.toInt()}-${it.endMs.toInt()}ms" }
+                )
+            }
             val parsed = Parsed(
                 lines = lines,
                 countdowns = countdowns,
                 tempoMap = tempoMap,
                 ticksPerBeat = ppqn,
                 totalMs = totalMs,
-                instrumental = result.lyricEventsTicks.isEmpty()
+                instrumental = result.lyricEventsTicks.isEmpty(),
+                instrumentalBreaks = breaks
             )
             parsed
         } catch (t: Throwable) {

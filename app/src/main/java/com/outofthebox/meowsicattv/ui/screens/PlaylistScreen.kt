@@ -31,7 +31,7 @@ import com.outofthebox.meowsicattv.data.LibraryRepository
 import com.outofthebox.meowsicattv.data.Playlist
 import com.outofthebox.meowsicattv.data.PlaylistStore
 import com.outofthebox.meowsicattv.data.SongItem
-import com.songhub.android.storage.BehaviorSettings
+import com.meowsicat.android.storage.BehaviorSettings
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.RepeatOne

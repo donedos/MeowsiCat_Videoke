@@ -14,7 +14,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.outofthebox.meowsicattv.MainActivity
 import com.outofthebox.meowsicattv.R
-import com.songhub.android.storage.BehaviorSettings
+import com.meowsicat.android.storage.BehaviorSettings
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Locale
@@ -24,6 +24,11 @@ class WebServerService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            WebServerManager.stop()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         createChannel()
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -52,11 +57,22 @@ class WebServerService : Service() {
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val stopIntent = Intent(this, WebServerService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this,
+            1,
+            stopIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(getString(R.string.app_name))
             .setContentText("Web remote ready at $url")
             .setContentIntent(openApp)
+            .addAction(R.drawable.ic_launcher_foreground, "Stop", stopPendingIntent)
             .setOngoing(true)
             .setShowWhen(false)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -81,6 +97,7 @@ class WebServerService : Service() {
     companion object {
         private const val CHANNEL_ID = "meowsicat_web_server"
         private const val NOTIFICATION_ID = 4201
+        private const val ACTION_STOP = "com.outofthebox.meowsicattv.server.ACTION_STOP"
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, WebServerService::class.java))
@@ -93,7 +110,7 @@ class WebServerService : Service() {
         private fun localIpAddress(context: Context): String {
             try {
                 val wifiManager =
-                    context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                    context.applicationContext.getSystemService(WIFI_SERVICE) as? WifiManager
                 val ipAddress = wifiManager?.connectionInfo?.ipAddress ?: 0
                 if (ipAddress != 0) {
                     return String.format(

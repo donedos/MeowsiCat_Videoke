@@ -5,7 +5,7 @@ import android.util.Log
 import com.outofthebox.meowsicattv.data.FavoritesStore
 import com.outofthebox.meowsicattv.data.LibraryRepository
 import com.outofthebox.meowsicattv.data.SongItem
-import com.songhub.android.storage.BehaviorSettings
+import com.meowsicat.android.storage.BehaviorSettings
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
