@@ -69,6 +69,16 @@ public final class BehaviorSettings {
         return prefs(context).getInt(KEY_WEB_PORT, 5678);
     }
 
+    private static final String KEY_BROADCAST_ENABLED = "broadcast_enabled";
+
+    public static void setBroadcastEnabled(Context context, boolean enabled) {
+        prefs(context).edit().putBoolean(KEY_BROADCAST_ENABLED, enabled).apply();
+    }
+
+    public static boolean isBroadcastEnabled(Context context) {
+        return prefs(context).getBoolean(KEY_BROADCAST_ENABLED, true);
+    }
+
     private static final String KEY_APP_THEME = "app_theme";
     public static final int THEME_DEFAULT = 0;
     public static final int THEME_IOS_BLUE = 1;

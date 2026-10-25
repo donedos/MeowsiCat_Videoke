@@ -28,11 +28,22 @@ object LibraryRepository {
     private val libraryCache = ConcurrentHashMap<String, Library>()
 
     /** Returns the user-chosen content root, or app-specific default root if none was saved. */
-    fun getSavedRoot(context: Context): String =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    fun getSavedRoot(context: Context): String {
+        val saved = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_CONTENT_ROOT, null)
             ?.takeIf { it.isNotBlank() }
-            ?: defaultRoot(context).absolutePath
+
+        val defaultAppRoot = defaultRoot(context).absolutePath
+        val filesDirRoot = context.filesDir.absolutePath
+
+        if (saved != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if ((saved.startsWith("/storage/emulated/0") || saved.startsWith("/sdcard")) &&
+                !saved.startsWith(defaultAppRoot) && !saved.startsWith(filesDirRoot)) {
+                return defaultAppRoot
+            }
+        }
+        return saved ?: defaultAppRoot
+    }
 
     /** Persists the content root so it survives app restarts. */
     fun setSavedRoot(context: Context, path: String) {
@@ -78,7 +89,7 @@ object LibraryRepository {
                 languages = emptyList(),
                 root = root,
                 error = if (songs.isEmpty()) {
-                    "Catalog not found. Put SongHub content in ${root.absolutePath}"
+                    "Content Folder Empty. No database files found in ${root.absolutePath}"
                 } else null
             )
         }

@@ -32,6 +32,7 @@ import androidx.compose.foundation.BorderStroke
 import com.outofthebox.meowsicattv.ui.components.InstrumentalBadge
 import com.outofthebox.meowsicattv.ui.components.rememberIsTvDevice
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -54,6 +55,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import kotlin.math.roundToInt
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -80,6 +82,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Camera
+import android.graphics.BitmapFactory
 import android.net.wifi.WifiManager
 import java.net.Inet4Address
 import java.net.NetworkInterface
@@ -90,6 +93,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.QrCode
 import com.outofthebox.meowsicattv.data.FavoritesStore
 import com.outofthebox.meowsicattv.server.RemoteCommandBus
+import com.outofthebox.meowsicattv.server.AudioBroadcast
 import com.outofthebox.meowsicattv.ui.components.QrCodeImage
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -133,7 +137,10 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -147,6 +154,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -172,6 +180,8 @@ import com.meowsicat.android.audio.SoundFontManager
 import com.meowsicat.android.model.CountdownGroup
 import com.meowsicat.android.model.LyricLine
 import com.meowsicat.android.parser.TempoUtils
+import org.json.JSONArray
+import org.json.JSONObject
 import com.meowsicat.android.song.ScoreCalculator
 import com.meowsicat.android.storage.AudioSettings
 import com.meowsicat.android.storage.BehaviorSettings
@@ -339,6 +349,7 @@ private fun LyricPlayer(
     val micSession = remember(context) { MicScoringSession(context) }
     DisposableEffect(song.code, selectCounter) {
         onDispose {
+            AudioBroadcast.setSource(null)
             engine.pause()
             engine.release()
             micSession.stopCapturing()
@@ -382,6 +393,21 @@ private fun LyricPlayer(
             RemoteCommandBus.getReservationQueue = null
             RemoteCommandBus.getCurrentSong = null
             RemoteCommandBus.getIsPlaying = null
+        }
+    }
+    // Keyed on the parsed lyrics (lines/tempo), NOT on song/selectCounter. activeSong changes
+    // immediately on a song switch but `lines` reloads asynchronously; keying on `lines` keeps the
+    // reported songCode atomic with the served lyrics so a mid-reload fetch can't cache a mismatch.
+    DisposableEffect(lines, countdowns, tempoMap, ticksPerBeat, totalMs) {
+        RemoteCommandBus.getLyricsPayload = {
+            buildLyricsJson(song, lines, countdowns, tempoMap, ticksPerBeat, totalMs)
+        }
+        RemoteCommandBus.getState = {
+            "{\"posMs\":$posMs,\"playing\":$playing,\"songCode\":${song.code}}"
+        }
+        onDispose {
+            RemoteCommandBus.getLyricsPayload = null
+            RemoteCommandBus.getState = null
         }
     }
     var showSearchDialog by rememberSaveable { mutableStateOf(false) }
@@ -523,6 +549,15 @@ private fun LyricPlayer(
             } else {
                 Log.w("PlayerScreen", "MIDI unavailable: ${song.displayTitle()}")
             }
+        }
+    }
+
+    // Feed the live engine to the browser broadcast hub while audio is loaded.
+    LaunchedEffect(audioReady, engine) {
+        if (audioReady) {
+            AudioBroadcast.setSource(engine)
+        } else {
+            AudioBroadcast.setSource(null)
         }
     }
 
@@ -913,12 +948,23 @@ private fun LyricPlayer(
 
     val inBreak = !isInstrumental && instrumentalBreaks.any { posMs in it }
 
+    // Pre-load the instrumental-break sprite sheet off the main thread so the first mid-song
+    // break doesn't hitch on a full-size PNG decode.
+    val instrumentalCatBitmap by produceState<ImageBitmap?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                BitmapFactory.decodeResource(context.resources, R.drawable.instrumental_cat)
+                    ?.asImageBitmap()
+            }.getOrNull()
+        }
+    }
+
     if (isInPipMode) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black)
-                .padding(8.dp),
+                .padding(6.dp),
             contentAlignment = Alignment.Center
         ) {
             Column(
@@ -926,34 +972,28 @@ private fun LyricPlayer(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = song.displayTitle(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(4.dp))
                 if (lines.isNotEmpty()) {
                     if (lyricStyle == LyricSettings.STYLE_KARAOKE) {
+                        val baseFont = LyricSettings.getFontSizePortrait(context)
+                        val pipFont = (baseFont * 1.35f).coerceIn(16f, 26f)
                         KaraokeStack(
                             lines = lines,
                             lineIndex = lineIndex,
                             posMs = posMs,
                             currentTick = posTick,
                             fillColor = KaraokeHighlight,
-                            fontSizeSp = LyricSettings.getFontSizePortrait(context)
+                            fontSizeSp = pipFont,
+                            forceCurrentOnTop = countdowns.any { it.lineIndex == lineIndex }
                         )
                     } else {
                         val current = lines.getOrNull(lineIndex)
                         Text(
                             text = current?.fullText() ?: "",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
                             color = KaraokeHighlight,
                             textAlign = TextAlign.Center,
-                            maxLines = 2,
+                            maxLines = 3,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
@@ -1137,7 +1177,8 @@ private fun LyricPlayer(
                         isInstrumental = isInstrumental,
                         inBreak = inBreak,
                         isPortrait = false,
-                        context = context
+                        context = context,
+                        catBitmap = instrumentalCatBitmap
                     )
                 }
             }
@@ -1189,6 +1230,7 @@ private fun LyricPlayer(
                         inBreak = inBreak,
                         isPortrait = true,
                         context = context,
+                        catBitmap = instrumentalCatBitmap,
                         availableHeightDp = if (portraitLyricHeightPx > 0) {
                             with(LocalDensity.current) { portraitLyricHeightPx.toDp() }
                         } else null
@@ -2926,7 +2968,8 @@ private fun KaraokeStack(
     currentTick: Long,
     fillColor: Color,
     fontSizeSp: Float,
-    maxLines: Int = 1
+    maxLines: Int = 1,
+    forceCurrentOnTop: Boolean = false
 ) {
     val context = LocalContext.current
     val fontFamily = rememberLyricFontFamily()
@@ -2949,9 +2992,11 @@ private fun KaraokeStack(
     if (maxLines > 1) {
         val current = lines.getOrNull(lineIndex)
         val next = lines.getOrNull(lineIndex + 1)
-        val isEven = lineIndex % 2 == 0
-        val topLine = if (isEven) current else next
-        val bottomLine = if (isEven) next else current
+        // A phrase that a 4·3·2·1 count-in leads into stays in the top slot for its whole
+        // phrase so the lines don't switch when the countdown ends.
+        val currentOnTop = lineIndex % 2 == 0 || forceCurrentOnTop
+        val topLine = if (currentOnTop) current else next
+        val bottomLine = if (currentOnTop) next else current
         val lineHeight = with(LocalDensity.current) { (fontSizeSp * 1.15f).sp.toDp() }
         val reservedSlot = lineHeight * maxLines + 2.dp * (maxLines - 1)
 
@@ -2973,7 +3018,7 @@ private fun KaraokeStack(
                     contentAlignment = Alignment.BottomCenter
                 ) {
                     if (topLine != null) {
-                        if (isEven) {
+                        if (currentOnTop) {
                             KaraokeLine(
                                 line = topLine,
                                 posMs = posMs,
@@ -3001,7 +3046,7 @@ private fun KaraokeStack(
                     contentAlignment = Alignment.TopCenter
                 ) {
                     if (bottomLine != null) {
-                        if (!isEven) {
+                        if (!currentOnTop) {
                             KaraokeLine(
                                 line = bottomLine,
                                 posMs = posMs,
@@ -3026,16 +3071,16 @@ private fun KaraokeStack(
         return
     }
 
-    val isEven = lineIndex % 2 == 0
-    val topLine = if (isEven) lines.getOrNull(lineIndex) else lines.getOrNull(lineIndex + 1)
-    val bottomLine = if (isEven) lines.getOrNull(lineIndex + 1) else lines.getOrNull(lineIndex)
+    val currentOnTop = lineIndex % 2 == 0 || forceCurrentOnTop
+    val topLine = if (currentOnTop) lines.getOrNull(lineIndex) else lines.getOrNull(lineIndex + 1)
+    val bottomLine = if (currentOnTop) lines.getOrNull(lineIndex + 1) else lines.getOrNull(lineIndex)
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         if (topLine != null) {
-            if (isEven) {
+            if (currentOnTop) {
                 KaraokeLine(
                     line = topLine,
                     posMs = posMs,
@@ -3060,7 +3105,7 @@ private fun KaraokeStack(
         Spacer(Modifier.height(if (maxLines > 1) 12.dp else 24.dp))
 
         if (bottomLine != null) {
-            if (!isEven) {
+            if (!currentOnTop) {
                 KaraokeLine(
                     line = bottomLine,
                     posMs = posMs,
@@ -3085,8 +3130,8 @@ private fun KaraokeStack(
 }
 
 /**
- * Single, unfilled karaoke line shown during the 4·3·2·1 count-in so the singer can see the
- * phrase that is about to be wiped. Rendered directly below the countdown dots.
+ * Single, unfilled karaoke line shown during the 4·3·2·1 count-in with a countdown image
+ * (count4, count3, count2, count1) displayed above the phrase.
  */
 @Composable
 private fun CountdownUpcomingLine(
@@ -3094,7 +3139,8 @@ private fun CountdownUpcomingLine(
     posMs: Double,
     currentTick: Long,
     fontSizeSp: Float,
-    maxLines: Int = 1
+    maxLines: Int = 1,
+    activeCountdown: CountdownGroup? = null
 ) {
     val context = LocalContext.current
     val fontFamily = rememberLyricFontFamily()
@@ -3110,15 +3156,245 @@ private fun CountdownUpcomingLine(
         )
     }
 
-    KaraokeLine(
-        line = line,
-        posMs = posMs,
-        currentTick = currentTick,
-        fillColor = KaraokeHighlight,
-        baseStyle = baseStyle,
-        outlinePx = outlinePx,
-        maxLines = maxLines
-    )
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        val maxWidthPx = with(LocalDensity.current) { maxWidth.toPx() }
+        val measurer = rememberTextMeasurer()
+        val text = line.fullText()
+        val fragments = line.fragments
+        val imageSizeDp = 130.dp
+        var wordCentreOffsetPx = 0f
+
+        if (maxLines > 1) {
+            val widths = remember(measurer, text, baseStyle) {
+                fragments.map { measurer.measure(it.text, baseStyle, softWrap = false).size.width.toFloat() }
+            }
+            val scale = if (widths.isEmpty()) 1f else fitScaleForLines(widths, maxWidthPx, maxLines)
+            val renderStyle = if (scale < 1f) {
+                baseStyle.copy(
+                    fontSize = (baseStyle.fontSize.value * scale).sp,
+                    lineHeight = (baseStyle.lineHeight.value * scale).sp
+                )
+            } else {
+                baseStyle
+            }
+            wordCentreOffsetPx = firstWordCentreOffsetPx(line, measurer, renderStyle, maxWidthPx, maxLines)
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                WrappedKaraokeLine(
+                    line = line,
+                    posMs = posMs,
+                    currentTick = currentTick,
+                    baseStyle = baseStyle,
+                    outlinePx = outlinePx,
+                    fillColor = KaraokeHighlight,
+                    filled = false,
+                    maxLines = maxLines
+                )
+            }
+        } else {
+            val fragmentWidths = remember(measurer, text, baseStyle) {
+                fragments.map { fragment ->
+                    measurer.measure(fragment.text, baseStyle, softWrap = false).size.width.toFloat()
+                }
+            }
+            val measuredTotal = fragmentWidths.sum()
+            val scale = if (measuredTotal > 0f) {
+                (maxWidthPx / measuredTotal).coerceIn(MIN_LYRIC_SCALE, 1f)
+            } else {
+                1f
+            }
+            val renderStyle = if (scale < 1f) {
+                baseStyle.copy(
+                    fontSize = (baseStyle.fontSize.value * scale).sp,
+                    lineHeight = (baseStyle.lineHeight.value * scale).sp
+                )
+            } else {
+                baseStyle
+            }
+            wordCentreOffsetPx = firstWordCentreOffsetPx(line, measurer, renderStyle, maxWidthPx, 1)
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                KaraokeLine(
+                    line = line,
+                    posMs = posMs,
+                    currentTick = currentTick,
+                    fillColor = KaraokeHighlight,
+                    baseStyle = baseStyle,
+                    outlinePx = outlinePx,
+                    maxLines = 1
+                )
+            }
+        }
+
+        // Drawn as an overlay centred above the phrase's first word, so the countdown never
+        // adds height and never pushes the lyrics down.
+        if (activeCountdown != null && activeCountdown.pipMs.isNotEmpty()) {
+            val density = LocalDensity.current
+            val halfImagePx = with(density) { imageSizeDp.toPx() / 2f }
+            // Keep the whole image inside the lyric area even when a very long phrase pushes
+            // the first word close to the edge.
+            val clampedOffsetPx = if (maxWidthPx > halfImagePx * 2f) {
+                wordCentreOffsetPx.coerceIn(-maxWidthPx / 2f + halfImagePx, maxWidthPx / 2f - halfImagePx)
+            } else {
+                0f
+            }
+            CountdownImageDisplay(
+                activeCountdown = activeCountdown,
+                posMs = posMs,
+                imageSizeDp = imageSizeDp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(x = with(density) { clampedOffsetPx.toDp() }, y = -(imageSizeDp))
+            )
+        }
+    }
+}
+
+/**
+ * Horizontal offset in px from the centre of the lyric box to the centre of [line]'s first word,
+ * matching how the phrase is actually rendered (centred, [style] already scaled to fit, wrapped to
+ * [maxLines] visual lines). Used to park the countdown image right above that word.
+ */
+private fun firstWordCentreOffsetPx(
+    line: LyricLine,
+    measurer: TextMeasurer,
+    style: TextStyle,
+    maxWidthPx: Float,
+    maxLines: Int
+): Float {
+    val text = line.fullText()
+    if (text.isBlank() || maxWidthPx <= 0f) return 0f
+    val start = text.indexOfFirst { !it.isWhitespace() }
+    if (start < 0) return 0f
+    var end = start
+    while (end < text.length && !text[end].isWhitespace()) end++
+    val leftPx = measurer.measure(text.substring(0, start), style, softWrap = false).size.width
+    val wordRightPx = measurer.measure(text.substring(0, end), style, softWrap = false).size.width
+    val wordCentrePx = (leftPx + wordRightPx) / 2f
+
+    val lineWidthPx = if (maxLines > 1) {
+        val widths = line.fragments.map {
+            measurer.measure(it.text, style, softWrap = false).size.width.toFloat()
+        }
+        val firstRange = wrapFragmentRanges(widths, maxWidthPx, maxLines).firstOrNull() ?: return 0f
+        var accumulated = 0f
+        for (i in firstRange) accumulated += widths[i]
+        accumulated
+    } else {
+        measurer.measure(text, style, softWrap = false).size.width.toFloat()
+    }
+    if (lineWidthPx <= 0f) return 0f
+    return wordCentrePx - lineWidthPx / 2f
+}
+
+@Composable
+private fun CountdownImageDisplay(
+    activeCountdown: CountdownGroup,
+    posMs: Double,
+    imageSizeDp: Dp = 130.dp,
+    modifier: Modifier = Modifier
+) {
+    val pipMsList = activeCountdown.pipMs
+    val beatsHit = pipMsList.count { pipTime -> posMs >= pipTime }
+    val countVal = (4 - beatsHit).coerceIn(1, 4)
+
+    val imageRes = remember(countVal) {
+        when (countVal) {
+            4 -> R.drawable.count4
+            3 -> R.drawable.count3
+            2 -> R.drawable.count2
+            1 -> R.drawable.count1
+            else -> R.drawable.count1
+        }
+    }
+
+    AnimatedContent(
+        targetState = imageRes,
+        modifier = modifier,
+        transitionSpec = {
+            (fadeIn(animationSpec = tween(150)) + scaleIn(initialScale = 0.7f, animationSpec = tween(200)))
+                .togetherWith(fadeOut(animationSpec = tween(100)) + scaleOut(targetScale = 1.2f, animationSpec = tween(100)))
+        },
+        label = "countdownImageTransition"
+    ) { targetRes ->
+        Image(
+            painter = painterResource(id = targetRes),
+            contentDescription = "Countdown $countVal",
+            modifier = Modifier.size(imageSizeDp)
+        )
+    }
+}
+
+/** Sprite sheet layout for res/drawable-nodpi/instrumental_cat.png: 4 columns x 3 rows = 12 frames. */
+private const val CAT_SPRITE_FRAME_COUNT = 12
+
+/** Uniform per-frame crop (px) so every frame is drawn at the same scale (no loop jitter). */
+private const val CAT_SPRITE_SRC_WIDTH = 260
+private const val CAT_SPRITE_SRC_HEIGHT = 330
+
+/** Ink bounding box (x0, y0, x1, y1) per frame, read order: left-to-right, top-to-bottom. */
+private val CAT_SPRITE_FRAME_BOXES = intArrayOf(
+    86, 20, 315, 316,
+    428, 18, 677, 319,
+    824, 27, 1083, 318,
+    1180, 18, 1412, 315,
+    84, 355, 322, 648,
+    446, 366, 691, 648,
+    826, 359, 1074, 649,
+    1210, 355, 1458, 648,
+    90, 690, 334, 983,
+    460, 687, 716, 982,
+    829, 695, 1069, 982,
+    1197, 699, 1437, 982
+)
+
+/**
+ * Loops the instrumental cat sprite sheet at ~10 fps. The crop window is centred on the frame's
+ * ink box and clamped to the bitmap, so all 12 frames share one size and the loop never jitters.
+ */
+@Composable
+private fun InstrumentalCatSprite(
+    bitmap: ImageBitmap,
+    modifier: Modifier = Modifier,
+    frameMillis: Long = 150L
+) {
+    var frame by remember { mutableIntStateOf(0) }
+    LaunchedEffect(bitmap) {
+        while (true) {
+            delay(frameMillis)
+            frame = (frame + 1) % CAT_SPRITE_FRAME_COUNT
+        }
+    }
+
+    val boxes = CAT_SPRITE_FRAME_BOXES
+    val base = frame * 4
+    val centreX = (boxes[base] + boxes[base + 2]) / 2f
+    val centreY = (boxes[base + 1] + boxes[base + 3]) / 2f
+    val srcLeft = (centreX - CAT_SPRITE_SRC_WIDTH / 2f).toInt()
+        .coerceIn(0, (bitmap.width - CAT_SPRITE_SRC_WIDTH).coerceAtLeast(0))
+    val srcTop = (centreY - CAT_SPRITE_SRC_HEIGHT / 2f).toInt()
+        .coerceIn(0, (bitmap.height - CAT_SPRITE_SRC_HEIGHT).coerceAtLeast(0))
+
+    Canvas(modifier = modifier) {
+        drawImage(
+            image = bitmap,
+            srcOffset = IntOffset(srcLeft, srcTop),
+            srcSize = IntSize(CAT_SPRITE_SRC_WIDTH, CAT_SPRITE_SRC_HEIGHT),
+            dstSize = IntSize(size.width.roundToInt(), size.height.roundToInt()),
+            filterQuality = FilterQuality.Medium
+        )
+    }
 }
 
 @Composable
@@ -3826,7 +4102,8 @@ private fun PlayerCenterContent(
     inBreak: Boolean = false,
     isPortrait: Boolean = false,
     context: Context,
-    availableHeightDp: Dp? = null
+    availableHeightDp: Dp? = null,
+    catBitmap: ImageBitmap? = null
 ) {
     // In portrait a long phrase wraps onto extra lines (keeping the font size) instead of
     // being squeezed onto one line. The user can pick 3 or 4 lines.
@@ -3961,51 +4238,6 @@ private fun PlayerCenterContent(
         }
     } else {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            if (activeCountdown != null && activeCountdown.pipMs.isNotEmpty()) {
-                val pipMsList = activeCountdown.pipMs
-                val beatsHit = pipMsList.count { pipTime -> posMs >= pipTime }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 20.dp)
-                ) {
-                    for (dotIndex in 0 until 4) {
-                        val isLit = dotIndex < beatsHit
-                        val dotColor by animateColorAsState(
-                            targetValue = if (isLit) Color(0xFF2DD4BF) else Color.White.copy(alpha = 0.25f),
-                            label = "dotColor"
-                        )
-                        val dotScale by animateFloatAsState(
-                            targetValue = if (isLit) 1.25f else 1.0f,
-                            label = "dotScale"
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .scale(dotScale)
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(dotColor)
-                                .then(
-                                    if (isLit) Modifier.border(
-                                        2.dp,
-                                        Color.White,
-                                        RoundedCornerShape(50)
-                                    ) else Modifier
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "${4 - dotIndex}",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Black,
-                                color = if (isLit) Color(0xFF003731) else Color.White.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
-                }
-            }
-
             if (lines.isEmpty()) {
                 if (isInstrumental) {
                     InstrumentalBadge()
@@ -4013,23 +4245,66 @@ private fun PlayerCenterContent(
                     Text("No lyrics", style = MaterialTheme.typography.titleLarge, color = Color.White)
                 }
             } else if (upcomingLine != null) {
-                // Count-in is showing (e.g. right after an instrumental break): hide the
-                // pill and preview the phrase about to be wiped, right below the 4·3·2·1 dots.
-                CountdownUpcomingLine(
-                    line = upcomingLine,
-                    posMs = posMs,
-                    currentTick = currentTick,
-                    fontSizeSp = lyricFontSizeSp,
-                    maxLines = if (isPortrait) portraitMaxLines else 1
-                )
-            } else if (inBreak) {
-                Box(
-                    modifier = Modifier.scale(1.6f),
-                    contentAlignment = Alignment.Center
+                // Count-in is showing: preview the upcoming phrase with the single Google-colored
+                // countdown circle on top of its first letter, and also keep the second phrase
+                // visible below it so it isn't hidden during the count-in.
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    InstrumentalBadge()
+                    CountdownUpcomingLine(
+                        line = upcomingLine,
+                        posMs = posMs,
+                        currentTick = currentTick,
+                        fontSizeSp = lyricFontSizeSp,
+                        maxLines = if (isPortrait) portraitMaxLines else 1,
+                        activeCountdown = activeCountdown
+                    )
+                    val secondPhrase = lines.getOrNull(countdownLine?.lineIndex?.plus(1) ?: -1)
+                    if (secondPhrase != null) {
+                        Spacer(Modifier.height(12.dp))
+                        KaraokeUpcomingLine(
+                            line = secondPhrase,
+                            baseStyle = TextStyle(
+                                fontFamily = rememberLyricFontFamily(),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = lyricFontSizeSp.sp,
+                                lineHeight = (lyricFontSizeSp * 1.15f).sp,
+                                textAlign = TextAlign.Center
+                            ),
+                            outlinePx = with(LocalDensity.current) { LyricSettings.getOutlineThickness(LocalContext.current).dp.toPx() },
+                            maxLines = if (isPortrait) portraitMaxLines else 1
+                        )
+                    }
+                }
+            } else if (inBreak) {
+                // Mid-song instrumental: no lyrics while the pill is showing — just the animated
+                // cat sprite sitting on top of the INSTRUMENTAL pill.
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    if (catBitmap != null) {
+                        InstrumentalCatSprite(
+                            bitmap = catBitmap,
+                            modifier = Modifier.size(width = 130.dp, height = 165.dp)
+                        )
+                        Spacer(Modifier.height(6.dp))
+                    }
+                    Box(
+                        modifier = Modifier.scale(1.6f),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        InstrumentalBadge()
+                    }
                 }
             } else if (lyricStyle == LyricSettings.STYLE_KARAOKE) {
+                // A phrase that a 4·3·2·1 count-in leads into keeps the top slot (where the
+                // countdown already showed it) for its whole phrase — the lines don't switch
+                // when the countdown ends.
+                val keepCountdownPhraseOnTop = remember(countdowns, lineIndex) {
+                    countdowns.any { it.lineIndex == lineIndex }
+                }
                 KaraokeStack(
                     lines = lines,
                     lineIndex = lineIndex,
@@ -4037,7 +4312,8 @@ private fun PlayerCenterContent(
                     currentTick = currentTick,
                     fillColor = KaraokeHighlight,
                     fontSizeSp = lyricFontSizeSp,
-                    maxLines = if (isPortrait) portraitMaxLines else 1
+                    maxLines = if (isPortrait) portraitMaxLines else 1,
+                    forceCurrentOnTop = keepCountdownPhraseOnTop
                 )
             } else {
                 LyricStack(lines = lines, lineIndex = lineIndex)
@@ -4051,4 +4327,69 @@ private fun fmtMs(ms: Double): String {
     val m = totalSeconds / 60
     val s = totalSeconds % 60
     return "%d:%02d".format(m, s)
+}
+
+private fun buildLyricsJson(
+    song: com.outofthebox.meowsicattv.data.SongItem,
+    lines: List<LyricLine>,
+    countdowns: List<CountdownGroup>,
+    tempoMap: List<TempoUtils.TempoEntry>,
+    ticksPerBeat: Int,
+    totalMs: Double
+): String {
+    val root = JSONObject()
+    root.put("songCode", song.code)
+    root.put("title", song.title)
+    root.put("singer", song.singer)
+    root.put("totalMs", totalMs)
+    root.put("ticksPerBeat", ticksPerBeat)
+
+    val tempoArr = JSONArray()
+    for (e in tempoMap) {
+        val o = JSONObject()
+        o.put("tick", e.tick)
+        o.put("mpqn", e.mpqn)
+        o.put("timeMs", e.timeMs)
+        tempoArr.put(o)
+    }
+    root.put("tempoMap", tempoArr)
+
+    val lineArr = JSONArray()
+    for (line in lines) {
+        val lo = JSONObject()
+        lo.put("startMs", line.startMs)
+        lo.put("endMs", line.endMs)
+        val fragArr = JSONArray()
+        for (f in line.fragments) {
+            val fo = JSONObject()
+            fo.put("text", f.text)
+            fo.put("absMs", f.absMs)
+            fo.put("endMs", f.endMs)
+            fo.put("absTick", f.absTick)
+            fo.put("endTick", f.endTick)
+            fragArr.put(fo)
+        }
+        lo.put("fragments", fragArr)
+        lineArr.put(lo)
+    }
+    root.put("lines", lineArr)
+
+    val cdArr = JSONArray()
+    for (cd in countdowns) {
+        val co = JSONObject()
+        co.put("lineIndex", cd.lineIndex)
+        co.put("anchorMs", cd.anchorMs)
+        val pipArr = JSONArray()
+        val pips = cd.pipMs
+        if (pips != null) {
+            for (p in pips) {
+                pipArr.put(p.toDouble())
+            }
+        }
+        co.put("pipMs", pipArr)
+        cdArr.put(co)
+    }
+    root.put("countdowns", cdArr)
+
+    return root.toString()
 }

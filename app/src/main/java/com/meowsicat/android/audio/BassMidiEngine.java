@@ -15,10 +15,18 @@ public class BassMidiEngine {
             BASS.BASS_SAMPLE_FLOAT | BASSMIDI.BASS_MIDI_DECAYEND | BASSMIDI.BASS_MIDI_SINCINTER;
     private static boolean isBassInitialized = false;
 
+    /** Sink for framed PCM captured live from the playing channel. */
+    public interface PcmFrameSink {
+        void onPcmFrame(byte[] frame);
+    }
+
     private final Context context;
     private int midiStream = 0;
     private int fontHandle = 0;
     private boolean hasStarted = false;
+
+    private volatile PcmFrameSink pcmSink = null;
+    private int dspHandle = 0;
 
     private int currentKeyShift = 0;
     private float currentTempoPercent = 100.0f;
@@ -187,6 +195,69 @@ public class BassMidiEngine {
             Log.e(TAG, "SoundFont load failed code: " + BASS.BASS_ErrorGetCode() + " path: " + path);
         }
         applyMapping();
+    }
+
+    public synchronized boolean attachPcmTap(PcmFrameSink sink) {
+        if (this.midiStream == 0 || sink == null) {
+            return false;
+        }
+        detachPcmTap();
+        this.pcmSink = sink;
+        this.dspHandle = BASS.BASS_ChannelSetDSP(this.midiStream, (handle, channel, buffer, length, user) -> {
+            PcmFrameSink s = this.pcmSink;
+            if (s == null || buffer == null || length < 4) {
+                return;
+            }
+            try {
+                int floatCount = length / 4;
+                if (floatCount <= 0) {
+                    return;
+                }
+                java.nio.ByteBuffer bb = buffer.duplicate();
+                bb.order(java.nio.ByteOrder.nativeOrder());
+                byte[] pcm = new byte[floatCount * 2];
+                for (int i = 0; i < floatCount; i++) {
+                    float f = bb.getFloat(i * 4);
+                    if (f > 1.0f) {
+                        f = 1.0f;
+                    } else if (f < -1.0f) {
+                        f = -1.0f;
+                    }
+                    short v = (short) (f * 32767.0f);
+                    pcm[i * 2] = (byte) (v & 0xff);
+                    pcm[i * 2 + 1] = (byte) ((v >> 8) & 0xff);
+                }
+                double posMs = getPositionMs();
+                byte[] frame = new byte[8 + pcm.length];
+                writeIntLE(frame, 0, (int) posMs);
+                writeIntLE(frame, 4, pcm.length);
+                System.arraycopy(pcm, 0, frame, 8, pcm.length);
+                s.onPcmFrame(frame);
+            } catch (Throwable t) {
+                // Never let a capture error take down the audio thread.
+            }
+        }, null, 0);
+        return this.dspHandle != 0;
+    }
+
+    public synchronized void detachPcmTap() {
+        int handle = this.dspHandle;
+        int stream = this.midiStream;
+        this.dspHandle = 0;
+        this.pcmSink = null;
+        if (handle != 0 && stream != 0) {
+            try {
+                BASS.BASS_ChannelRemoveDSP(stream, handle);
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
+    private static void writeIntLE(byte[] dst, int offset, int value) {
+        dst[offset] = (byte) (value & 0xff);
+        dst[offset + 1] = (byte) ((value >> 8) & 0xff);
+        dst[offset + 2] = (byte) ((value >> 16) & 0xff);
+        dst[offset + 3] = (byte) ((value >> 24) & 0xff);
     }
 
     public void play() {

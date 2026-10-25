@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.SettingsRemote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -91,11 +92,15 @@ fun HomeScreen(
     onOpenSong: (SongItem) -> Unit = {}
 ) {
     val isWide = LocalConfiguration.current.screenWidthDp >= 720
-    PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = onRefreshLibrary,
-        modifier = Modifier.fillMaxSize()
-    ) {
+    val context = LocalContext.current
+    val isTvDevice = remember(context) {
+        val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            context.packageManager.hasSystemFeature("android.hardware.type.television")
+    }
+
+    val content = @Composable {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -173,13 +178,6 @@ fun HomeScreen(
             }
 
             Spacer(Modifier.height(28.dp))
-            val context = LocalContext.current
-            val isTvDevice = remember(context) {
-                val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-                uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
-                    context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
-                    context.packageManager.hasSystemFeature("android.hardware.type.television")
-            }
 
             val items = remember(isTvDevice, onOpenPlayer, onOpenSongs, onOpenFavorites, onOpenPlaylist, onOpenSettings) {
                 buildList {
@@ -187,9 +185,6 @@ fun HomeScreen(
                     add(CategoryCardData("Song Search", "Find by title or singer", Icons.Filled.Search, onOpenSongs))
                     add(CategoryCardData("Favorites", "Your tagged songs", Icons.Filled.Favorite, onOpenFavorites))
                     add(CategoryCardData("Playlist", "Custom song list", Icons.AutoMirrored.Filled.QueueMusic, onOpenPlaylist))
-                    // if (!isTvDevice) {
-                    //     add(CategoryCardData("Remote", "Mobile remote control", Icons.Filled.SettingsRemote, { }))
-                    // }
                     add(CategoryCardData("Settings", "Content & display", Icons.Filled.Settings, onOpenSettings))
                 }
             }
@@ -198,6 +193,18 @@ fun HomeScreen(
             } else {
                 CategoryGrid(items, Modifier.weight(1f))
             }
+        }
+    }
+
+    if (isTvDevice) {
+        content()
+    } else {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefreshLibrary,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            content()
         }
     }
 }

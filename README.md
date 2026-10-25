@@ -23,7 +23,7 @@
 | Android Gradle Plugin | 9.4.1 |
 | Java compatibility | 11 |
 
-On **Android 11+**, the app requests *"All files access"* (`MANAGE_EXTERNAL_STORAGE`) so it can read content folders outside of scoped storage. Grant this permission when prompted.
+On **Android 13+**, the app requests granular media permissions (`READ_MEDIA_AUDIO`, `READ_MEDIA_IMAGES`) and supports **Storage Access Framework (SAF)** to read and manage content folders and USB drives without requiring `MANAGE_EXTERNAL_STORAGE`.
 
 ## Content Layout
 

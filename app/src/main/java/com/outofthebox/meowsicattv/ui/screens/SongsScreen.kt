@@ -19,10 +19,17 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.outofthebox.meowsicattv.ui.components.rememberIsTvDevice
+import android.app.UiModeManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
@@ -128,11 +135,14 @@ fun SongsScreen(
         else -> "Song Search"
     }
 
-    PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = onRefreshLibrary,
-        modifier = Modifier.fillMaxSize()
-    ) {
+    val isTvDevice = remember(context) {
+        val uiModeManager = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            context.packageManager.hasSystemFeature("android.hardware.type.television")
+    }
+
+    val content = @Composable {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -301,6 +311,18 @@ fun SongsScreen(
             }
         }
     }
+
+    if (isTvDevice) {
+        content()
+    } else {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefreshLibrary,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            content()
+        }
+    }
 }
 
 @Composable
@@ -390,34 +412,61 @@ private fun ListItemActionButton(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SongListItem(song: SongItem, onClick: () -> Unit) {
     val context = LocalContext.current
     var isFav by remember(song.code) {
         mutableStateOf(FavoritesStore.isFavorite(context, song.code))
     }
+    var isCardFocused by remember { mutableStateOf(false) }
+    val isTv = rememberIsTvDevice()
 
-    FocusableCard(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp)
+    val primaryContainer = MaterialTheme.colorScheme.primaryContainer
+
+    val scale by animateFloatAsState(
+        targetValue = if (isCardFocused && isTv) 1.05f else 1f,
+        label = "itemScale"
+    )
+    val bg by animateColorAsState(
+        targetValue = if (isCardFocused && isTv) primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        label = "itemBg"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { isCardFocused = it.isFocused }
+            .graphicsLayer(scaleX = scale, scaleY = scale)
+            .shadow(if (isCardFocused && isTv) 8.dp else 2.dp, RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(12.dp))
+            .background(bg)
+            .border(
+                width = if (isCardFocused && isTv) 3.5.dp else 1.dp,
+                color = if (isCardFocused && isTv) Color.White else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(end = 12.dp)
             ) {
                 Text(
                     text = song.displayCode(),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Black,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    color = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }

@@ -11,6 +11,8 @@ import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.outofthebox.meowsicattv.MainActivity
 import com.outofthebox.meowsicattv.R
@@ -21,6 +23,9 @@ import java.util.Locale
 
 class WebServerService : Service() {
 
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -29,6 +34,7 @@ class WebServerService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        acquireLocks()
         createChannel()
         val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -40,12 +46,65 @@ class WebServerService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        return START_NOT_STICKY
+        // Verify the web server is actually up. The system can restart this
+        // service (START_STICKY) after process death, in which case there is
+        // no library loaded and nothing to serve — don't show a lying
+        // "Web remote ready" notification in that case.
+        if (!WebServerManager.isAlive()) {
+            if (WebServerManager.currentLibrary != null) {
+                WebServerManager.restart(this)
+            } else {
+                Log.w("WebServerService", "Server not alive and no library loaded; stopping service")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        }
+        return START_STICKY
     }
 
     override fun onDestroy() {
+        releaseLocks()
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
+    }
+
+    private fun acquireLocks() {
+        try {
+            val powerManager = getSystemService(POWER_SERVICE) as? PowerManager
+            if (wakeLock == null) {
+                wakeLock = powerManager?.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "MeowsiCatTV:WebServerWakeLock"
+                )
+            }
+            wakeLock?.apply {
+                if (!isHeld) {
+                    acquire(24 * 60 * 60 * 1000L) // 24 hours lock
+                }
+            }
+            val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as? WifiManager
+            if (wifiLock == null) {
+                @Suppress("DEPRECATION")
+                wifiLock = wifiManager?.createWifiLock(
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                    "MeowsiCatTV:WebServerWifiLock"
+                )?.apply {
+                    setReferenceCounted(false)
+                }
+            }
+            wifiLock?.apply { if (!isHeld) acquire() }
+        } catch (e: Exception) {
+            Log.e("WebServerService", "Failed to acquire locks", e)
+        }
+    }
+
+    private fun releaseLocks() {
+        try {
+            wakeLock?.let { if (it.isHeld) it.release() }
+            wakeLock = null
+            wifiLock?.let { if (it.isHeld) it.release() }
+            wifiLock = null
+        } catch (_: Exception) {}
     }
 
     private fun buildNotification(): Notification {

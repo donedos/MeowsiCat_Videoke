@@ -124,6 +124,7 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             wanted += Manifest.permission.POST_NOTIFICATIONS
             wanted += Manifest.permission.READ_MEDIA_AUDIO
+            wanted += Manifest.permission.READ_MEDIA_IMAGES
         } else {
             wanted += Manifest.permission.READ_EXTERNAL_STORAGE
         }
