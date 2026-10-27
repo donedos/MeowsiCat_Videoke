@@ -31,6 +31,8 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import com.outofthebox.meowsicattv.ui.components.InstrumentalBadge
 import com.outofthebox.meowsicattv.ui.components.rememberIsTvDevice
+import com.outofthebox.meowsicattv.ui.components.KeypadButton
+import com.outofthebox.meowsicattv.ui.components.CustomQwertyKeyboard
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -175,6 +177,21 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.meowsicat.android.audio.BassMidiEngine
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ExperimentalLensFacing
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.material3.Button
+import androidx.compose.runtime.DisposableEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.meowsicat.android.audio.MicScoringSession
 import com.meowsicat.android.audio.SoundFontManager
 import com.meowsicat.android.model.CountdownGroup
@@ -239,13 +256,15 @@ fun PlayerScreen(
     var selectCounter by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
     val wipeChannel = AudioSettings.getWipeMelodyChannel(context)
+    val melodyChannel = AudioSettings.getMelodyChannel(context)
     val parsed by produceState(
         initialValue = LyricLoader.Parsed(emptyList()),
-        key1 = activeSong.code,
-        key2 = selectCounter,
-        key3 = wipeChannel
+        activeSong.code,
+        selectCounter,
+        wipeChannel,
+        melodyChannel
     ) {
-        value = LyricLoader.load(activeSong, wipeChannel)
+        value = LyricLoader.load(activeSong, wipeChannel = wipeChannel, melodyChannel = melodyChannel)
     }
 
     if (parsed.error != null && parsed.lines.isEmpty() && activeSong.code != 0) {
@@ -443,6 +462,32 @@ private fun LyricPlayer(
     }
 
     var bgvIndex by rememberSaveable { mutableIntStateOf(0) }
+
+    val handleBgvToggle = {
+        val currentMode = BgvSettings.getMode(context)
+        if (currentMode == BgvSettings.MODE_CAMERA) {
+            val currentLens = BgvSettings.getCameraLens(context)
+            val availableLenses = BgvSettings.getAvailableCameraLenses(context)
+            val newLens = if (availableLenses.size > 1) {
+                val idx = availableLenses.indexOf(currentLens)
+                if (idx >= 0) availableLenses[(idx + 1) % availableLenses.size] else availableLenses[0]
+            } else {
+                if (currentLens == BgvSettings.LENS_BACK) BgvSettings.LENS_FRONT else BgvSettings.LENS_BACK
+            }
+            BgvSettings.setCameraLens(context, newLens)
+            bgvIndex++
+            val lensLabel = when (newLens) {
+                BgvSettings.LENS_FRONT -> "Front Camera"
+                BgvSettings.LENS_BACK -> "Rear Camera"
+                BgvSettings.LENS_EXTERNAL -> "External Camera"
+                else -> "Camera"
+            }
+            statusToast = "Camera: $lensLabel"
+        } else {
+            bgvIndex++
+            statusToast = "BGV Switched"
+        }
+    }
 
     // Key, Tempo, Melody states
     var keyShift by rememberSaveable { mutableIntStateOf(0) }
@@ -1184,15 +1229,11 @@ private fun LyricPlayer(
             }
         } else {
             val isPortraitDialogActive = showSearchDialog || showRsvDialog || showQrDialog || showFavDialog
-            val reservedBottom = animateDpAsState(
-                targetValue = if (isPortraitDialogActive) 320.dp else 16.dp,
-                label = "portraitBottomInset"
-            ).value
 
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = reservedBottom),
+                    .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 TopSongHeader(
@@ -1205,16 +1246,15 @@ private fun LyricPlayer(
                     isLandscape = false
                 )
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
 
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp)
-                        .then(if (isPortraitDialogActive) Modifier.padding(top = 16.dp) else Modifier)
+                        .padding(horizontal = 8.dp)
                         .onSizeChanged { portraitLyricHeightPx = it.height },
-                    contentAlignment = if (isPortraitDialogActive) Alignment.TopCenter else Alignment.Center
+                    contentAlignment = Alignment.Center
                 ) {
                     PlayerCenterContent(
                         song = song,
@@ -1237,7 +1277,11 @@ private fun LyricPlayer(
                     )
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
+
+                if (isPortraitDialogActive) {
+                    Spacer(Modifier.fillMaxHeight(0.52f))
+                }
 
                 AnimatedVisibility(
                     visible = controlsVisible && !isAnyDialogActive,
@@ -1301,10 +1345,7 @@ private fun LyricPlayer(
                             showFavDialog = true
                             controlsVisible = false
                         },
-                        onBgvToggle = {
-                            bgvIndex++
-                            statusToast = "BGV Switched"
-                        },
+                        onBgvToggle = handleBgvToggle,
                         searchFocusRequester = searchFocusRequester,
                         digitFocusRequesters = digitFocusRequesters,
                         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
@@ -1382,10 +1423,7 @@ private fun LyricPlayer(
                         showFavDialog = true
                         controlsVisible = false
                     },
-                    onBgvToggle = {
-                        bgvIndex++
-                        statusToast = "BGV Switched"
-                    },
+                    onBgvToggle = handleBgvToggle,
                     searchFocusRequester = searchFocusRequester,
                     digitFocusRequesters = digitFocusRequesters,
                     shape = RoundedCornerShape(20.dp),
@@ -1510,13 +1548,14 @@ private fun LyricPlayer(
             )
         }
 
-        // Floating Draggable MeowsiCat (visible when controls/keypad are hidden and enabled in settings)
+        // Floating Draggable MeowsiCat (visible when controls/keypad are hidden and no dialogs are active, and enabled in settings)
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
             val floatingCatEnabled = BehaviorSettings.isFloatingCatEnabled(context)
+            val isAnyDialogActive = showSearchDialog || showRsvDialog || showQrDialog || showFavDialog || (pendingScore >= 0)
             FloatingMeowsiCat(
-                visible = !controlsVisible && floatingCatEnabled,
+                visible = !controlsVisible && !isAnyDialogActive && floatingCatEnabled,
                 onClick = { controlsVisible = true }
             )
         }
@@ -2158,65 +2197,7 @@ private fun DigitKey(
     }
 }
 
-@Composable
-private fun KeypadButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    backgroundColor: Color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f),
-    focusedColor: Color = MaterialTheme.colorScheme.primary,
-    enabled: Boolean = true,
-    content: @Composable () -> Unit
-) {
-    val shape = RoundedCornerShape(10.dp)
-    // Interaction source drives the D-pad focus highlight so the same treatment works whether
-    // the key is selected by touch or by a TV remote.
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
 
-    val containerColor by animateColorAsState(
-        targetValue = if (isFocused) focusedColor else backgroundColor,
-        label = "keypadContainer"
-    )
-    val focusScale by animateFloatAsState(
-        targetValue = if (isFocused) 1.08f else 1f,
-        label = "keypadScale"
-    )
-    val borderColor by animateColorAsState(
-        targetValue = if (isFocused) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
-        label = "keypadBorder"
-    )
-    val borderWidth by animateDpAsState(
-        targetValue = if (isFocused) 3.dp else 1.dp,
-        label = "keypadBorderWidth"
-    )
-
-    Surface(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = modifier
-            .graphicsLayer(scaleX = focusScale, scaleY = focusScale)
-            .then(
-                if (isFocused) {
-                    Modifier.shadow(14.dp, shape, spotColor = focusedColor)
-                } else {
-                    Modifier
-                }
-            ),
-        shape = shape,
-        color = containerColor,
-        contentColor = Color.White,
-        border = BorderStroke(borderWidth, borderColor),
-        tonalElevation = if (isFocused) 8.dp else 4.dp,
-        interactionSource = interactionSource
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            content()
-        }
-    }
-}
 
 @Composable
 private fun DialogActionButton(
@@ -2302,9 +2283,9 @@ private fun QuickSearchDialog(
         Surface(
             modifier = if (isRightPanel) {
                 Modifier
-                    .width(420.dp)
+                    .width(370.dp)
                     .fillMaxHeight()
-                    .padding(vertical = 12.dp, horizontal = 16.dp)
+                    .padding(vertical = 12.dp, horizontal = 12.dp)
                     .pointerInput(Unit) {
                         detectTapGestures { }
                     }
@@ -2312,7 +2293,7 @@ private fun QuickSearchDialog(
                 Modifier
                     .fillMaxWidth()
                     .fillMaxHeight(0.52f)
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
                     .pointerInput(Unit) {
                         detectTapGestures { }
                     }
@@ -2322,7 +2303,7 @@ private fun QuickSearchDialog(
             border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
             tonalElevation = 16.dp
         ) {
-            Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 // Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2331,7 +2312,7 @@ private fun QuickSearchDialog(
                 ) {
                     Text(
                         text = "Song Search",
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
@@ -2339,27 +2320,63 @@ private fun QuickSearchDialog(
                         onClick = onDismiss,
                         defaultBg = Color.White.copy(alpha = 0.15f),
                         focusedBg = Color(0xFFEF4444),
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(32.dp),
                         shape = CircleShape
                     ) {
-                        Icon(Icons.Filled.Clear, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(20.dp))
+                        Icon(Icons.Filled.Clear, contentDescription = "Close", tint = Color.White, modifier = Modifier.size(18.dp))
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(6.dp))
 
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(searchFocusRequester),
-                    placeholder = { Text("Type title, artist, or code...") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp)
+                // Query Readout / Input Box
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1E293B),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (query.isEmpty()) "Type title, artist, or code..." else query,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = if (query.isEmpty()) FontWeight.Normal else FontWeight.Bold,
+                            color = if (query.isEmpty()) Color.White.copy(alpha = 0.4f) else Color(0xFFFBBF24),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .then(if (isRightPanel) Modifier.focusRequester(searchFocusRequester) else Modifier)
+                        )
+                        if (query.isNotEmpty()) {
+                            DialogActionButton(
+                                onClick = { query = "" },
+                                defaultBg = Color(0xFF7F1D1D),
+                                focusedBg = Color(0xFFEF4444),
+                                modifier = Modifier.size(24.dp)
+                            ) {
+                                Icon(Icons.Filled.Clear, contentDescription = "Clear", tint = Color.White, modifier = Modifier.size(14.dp))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                // Compressed Onscreen QWERTY Keyboard
+                CustomQwertyKeyboard(
+                    onCharPress = { char -> query += char },
+                    onBackspace = { if (query.isNotEmpty()) query = query.dropLast(1) },
+                    onClear = { query = "" },
+                    keyHeight = if (isRightPanel) 28.dp else 26.dp
                 )
-
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(6.dp))
 
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -2456,6 +2473,8 @@ private fun QuickSearchDialog(
         }
     }
 }
+
+
 
 @Composable
 private fun ReservationListDialog(
@@ -3687,13 +3706,12 @@ private fun karaokeProgressPx(
     if (fragments.isEmpty() || fragmentWidths.size != fragments.size) return 0f
 
     val totalWidth = fragmentWidths.sum()
-    if (posMs <= line.startMs) return 0f
-    if (posMs >= line.endMs) return totalWidth
 
-    val lineDuration = line.endMs - line.startMs
-    if (lineDuration <= 0) return totalWidth
-
+    // 1. Tick-based wipe (MIDI clock accurate)
     if (currentTick > 0L && fragments.all { it.endTick > it.absTick }) {
+        if (currentTick <= fragments[0].absTick) return 0f
+        if (currentTick >= fragments.last().endTick) return totalWidth
+
         var tickProgressed = 0f
         for (i in fragments.indices) {
             val fragment = fragments[i]
@@ -3718,6 +3736,10 @@ private fun karaokeProgressPx(
         }
         return tickProgressed.coerceIn(0f, totalWidth)
     }
+
+    // 2. Time-based fallback (posMs)
+    if (posMs <= line.startMs) return 0f
+    if (posMs >= line.endMs) return totalWidth
 
     var progressed = 0f
     for (i in fragments.indices) {
@@ -3966,6 +3988,84 @@ private fun DefaultAnimatedBackground(bgvIndex: Int, modifier: Modifier = Modifi
     )
 }
 
+@OptIn(ExperimentalLensFacing::class)
+@Composable
+private fun CameraBackgroundPreview(
+    cameraLens: Int,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val lensFacing = remember(cameraLens) {
+        when (cameraLens) {
+            BgvSettings.LENS_FRONT -> CameraSelector.LENS_FACING_FRONT
+            BgvSettings.LENS_BACK -> CameraSelector.LENS_FACING_BACK
+            BgvSettings.LENS_EXTERNAL -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                CameraSelector.LENS_FACING_EXTERNAL
+            } else {
+                CameraSelector.LENS_FACING_BACK
+            }
+            else -> CameraSelector.LENS_FACING_BACK
+        }
+    }
+
+    val cameraSelector = remember(lensFacing) {
+        CameraSelector.Builder().requireLensFacing(lensFacing).build()
+    }
+
+    var cameraProviderRef by remember { mutableStateOf<ProcessCameraProvider?>(null) }
+
+    DisposableEffect(lifecycleOwner) {
+        onDispose {
+            try {
+                cameraProviderRef?.unbindAll()
+            } catch (e: Exception) {
+                Log.e("CameraPreview", "Error unbinding camera", e)
+            }
+        }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PreviewView(ctx).apply {
+                scaleType = PreviewView.ScaleType.FILL_CENTER
+            }
+        },
+        update = { previewView ->
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            cameraProviderFuture.addListener({
+                try {
+                    val provider = cameraProviderFuture.get()
+                    cameraProviderRef = provider
+                    val preview = Preview.Builder().build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
+                    provider.unbindAll()
+
+                    val targetSelector = when {
+                        provider.hasCamera(cameraSelector) -> cameraSelector
+                        provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA) -> CameraSelector.DEFAULT_BACK_CAMERA
+                        provider.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) -> CameraSelector.DEFAULT_FRONT_CAMERA
+                        else -> null
+                    }
+
+                    if (targetSelector != null) {
+                        provider.bindToLifecycle(
+                            lifecycleOwner,
+                            targetSelector,
+                            preview
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e("CameraPreview", "Failed to bind camera use cases", e)
+                }
+            }, ContextCompat.getMainExecutor(context))
+        },
+        modifier = modifier
+    )
+}
+
 @OptIn(UnstableApi::class)
 @Composable
 private fun BackgroundVideoPlayer(
@@ -3974,8 +4074,67 @@ private fun BackgroundVideoPlayer(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val bgvMode = remember(context) { BgvSettings.getMode(context) }
+    val bgvMode = remember(context, bgvIndex) { BgvSettings.getMode(context) }
     val libraryRoot = remember(bgvDir, context) { bgvDir?.parentFile ?: LibraryRepository.defaultRoot(context) }
+
+    if (bgvMode == BgvSettings.MODE_CAMERA) {
+        val hasCameraPermission = remember(context) {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+        }
+        var permissionGranted by remember { mutableStateOf(hasCameraPermission) }
+        val cameraPermissionLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission()
+        ) { isGranted ->
+            permissionGranted = isGranted
+        }
+
+        LaunchedEffect(Unit) {
+            if (!hasCameraPermission) {
+                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            }
+        }
+
+        if (permissionGranted) {
+            if (BgvSettings.hasAnyCamera(context)) {
+                val cameraLens = remember(bgvIndex) { BgvSettings.getCameraLens(context) }
+                CameraBackgroundPreview(
+                    cameraLens = cameraLens,
+                    modifier = modifier.fillMaxSize()
+                )
+                return
+            } else {
+                Box(
+                    modifier = modifier.fillMaxSize().background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No camera found on this device",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+                return
+            }
+        } else {
+            Box(
+                modifier = modifier.fillMaxSize().background(Color.Black),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Camera permission required for Camera Background",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Button(onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                        Text("Grant Permission")
+                    }
+                }
+            }
+            return
+        }
+    }
 
     if (bgvMode == BgvSettings.MODE_STATIC_PHOTO) {
         val staticPath = remember(context) { BgvSettings.getStaticPhotoPath(context) }

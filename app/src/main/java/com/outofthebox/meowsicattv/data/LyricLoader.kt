@@ -46,11 +46,15 @@ object LyricLoader {
         val instrumentalBreaks: List<MsSpan> = emptyList()
     )
 
-    suspend fun load(song: SongItem, wipeChannel: Int = 0): Parsed = withContext(Dispatchers.IO) {
+    suspend fun load(
+        song: SongItem,
+        wipeChannel: Int = 0,
+        melodyChannel: Int = 0
+    ): Parsed = withContext(Dispatchers.IO) {
         if (song.code == 0) {
             return@withContext Parsed(emptyList())
         }
-        val cacheKey = song.code.toLong() * 32L + wipeChannel.coerceIn(0, 16)
+        val cacheKey = song.code.toLong() * 1024L + wipeChannel.coerceIn(0, 16) * 32L + melodyChannel.coerceIn(0, 16)
         if (lyricCache.containsKey(cacheKey)) {
             return@withContext lyricCache[cacheKey]!!
         }
@@ -61,7 +65,7 @@ object LyricLoader {
             val tempoMap = result.tempoMap
             val ppqn = result.ticksPerBeat
             if (tempoMap.isNotEmpty() && ppqn > 0) {
-                val guideSpans = pickMelodySpans(result, wipeChannel)?.let { legatoSpans(it) }
+                val guideSpans = pickMelodySpans(result, wipeChannel, melodyChannel)?.let { legatoSpans(it) }
                 val timingSpans = collectTimingSpans(result)
                 if (guideSpans != null || timingSpans.isNotEmpty()) {
                     applyMelodyTiming(lines, guideSpans ?: emptyList(), timingSpans, tempoMap, ppqn)
@@ -121,7 +125,11 @@ object LyricLoader {
         val polyFrac: Double
     )
 
-    private fun pickMelodySpans(result: MidiParser.ParseResult, wipeChannel: Int = 0): List<MidiParser.NoteSpan>? {
+    private fun pickMelodySpans(
+        result: MidiParser.ParseResult,
+        wipeChannel: Int = 0,
+        melodyChannel: Int = 0
+    ): List<MidiParser.NoteSpan>? {
         val races = result.noteRunsByChannel ?: return null
         if (wipeChannel in 1..16) {
             val forced = races.getOrNull(wipeChannel - 1)
@@ -157,6 +165,21 @@ object LyricLoader {
                     }
                 }
                 if (bestChannel >= 0) return races[bestChannel]
+            }
+        }
+
+        // If the user specified a Default Melody Channel (e.g. channel 1..16) and wipeChannel is Auto (0),
+        // check if that channel carries melodic notes matching lyric onsets before fallback heuristics.
+        if (melodyChannel in 1..16) {
+            val preferredSpans = races.getOrNull(melodyChannel - 1)
+            if (!preferredSpans.isNullOrEmpty()) {
+                var count = 0
+                for (lyricTick in lyricTicks) {
+                    if (preferredSpans.any { abs(it.onTick - lyricTick) <= ALIGN_WINDOW }) count++
+                }
+                if (count >= required) {
+                    return preferredSpans
+                }
             }
         }
 
@@ -445,46 +468,57 @@ object LyricLoader {
         nextAbsMs: Double?,
         nextLineStartMs: Double?
     ) {
-        val windowStart = fragment.absTick
+        val rawStartTick = fragment.absTick
         val windowEndTick = listOfNotNull(
             nextAbsMs?.let { Math.round(TempoUtils.msToTick(tempoMap, it, ppqn)) },
             nextLineStartMs?.let { Math.round(TempoUtils.msToTick(tempoMap, it, ppqn)) }
-        ).minOrNull() ?: windowStart + Math.round(
+        ).minOrNull() ?: (rawStartTick + Math.round(
             TempoUtils.msToTick(tempoMap, fragment.absMs + MAX_FILL_MS, ppqn)
-        )
-        if (windowEndTick <= windowStart) return
-        val noteEnd = findNoteEndInWindow(spans, windowStart, windowEndTick)
-            ?: findNoteEnd(spans, fragment.absTick)
-        if (noteEnd == null || noteEnd <= fragment.absTick) return
+        ))
+
+        if (windowEndTick <= rawStartTick) return
+
+        val matchingSpans = spans.filter { span ->
+            (span.onTick >= rawStartTick - ALIGN_WINDOW && span.onTick < windowEndTick) ||
+                (span.onTick <= rawStartTick + ALIGN_WINDOW && span.offTick > rawStartTick)
+        }
+
+        val bestStartTick = matchingSpans
+            .map { it.onTick }
+            .filter { abs(it - rawStartTick) <= ALIGN_WINDOW }
+            .minByOrNull { abs(it - rawStartTick) }
+
+        val startTick = bestStartTick ?: rawStartTick
+        if (startTick != rawStartTick) {
+            fragment.absTick = startTick
+            fragment.absMs = TempoUtils.tickToMs(tempoMap, startTick, ppqn)
+        }
+
+        val noteEnd = matchingSpans.maxOfOrNull { it.offTick }
+            ?: findNoteEnd(spans, startTick)
+
+        val finalEndTick = if (noteEnd != null && noteEnd > startTick) {
+            minOf(noteEnd, maxOf(startTick + 1, windowEndTick))
+        } else {
+            maxOf(startTick + 1, windowEndTick)
+        }
+
         val endMs = minOf(
-            TempoUtils.tickToMs(tempoMap, noteEnd, ppqn),
+            TempoUtils.tickToMs(tempoMap, finalEndTick, ppqn),
             fragment.absMs + MAX_FILL_MS,
             nextAbsMs ?: Double.MAX_VALUE,
             nextLineStartMs ?: Double.MAX_VALUE
         )
-        if (endMs <= fragment.absMs) return
-        fragment.endMs = endMs
-        val endTick = Math.round(TempoUtils.msToTick(tempoMap, endMs, ppqn))
-        fragment.endTick = endTick
-        val duration = endTick - fragment.absTick
+        fragment.endMs = maxOf(fragment.absMs + 1.0, endMs)
+        fragment.endTick = maxOf(startTick + 1, Math.round(TempoUtils.msToTick(tempoMap, fragment.endMs, ppqn)))
+        val duration = fragment.endTick - fragment.absTick
         if (duration > 0) {
             fragment.durationTicks = duration
             fragment.invDuration = 1.0 / duration.toDouble()
         }
     }
 
-    private fun findNoteEndInWindow(
-        spans: List<MidiParser.NoteSpan>,
-        startTick: Long,
-        endTick: Long
-    ): Long? {
-        var best: Long? = null
-        for (span in spans) {
-            if (span.onTick < startTick || span.onTick >= endTick) continue
-            if (best == null || span.offTick > best) best = span.offTick
-        }
-        return best
-    }
+
 
     private fun findNoteEnd(spans: List<MidiParser.NoteSpan>, tick: Long): Long? {
         var best: Long? = null

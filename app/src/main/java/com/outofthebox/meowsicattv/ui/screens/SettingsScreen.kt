@@ -728,7 +728,7 @@ fun SettingsScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Play .mp4 background videos from bgv/ ($mp4Count found) or static background photos from bgphoto/ ($photoCount found).",
+                        text = "Play .mp4 background videos from bgv/ ($mp4Count found), static background photos from bgphoto/ ($photoCount found), or live camera feed.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -752,6 +752,63 @@ fun SettingsScreen(
                                 BgvSettings.setStaticPhotoPath(context, path)
                             }
                         )
+                    } else if (bgvMode == BgvSettings.MODE_CAMERA) {
+                        Spacer(Modifier.height(10.dp))
+                        var cameraPermissionGranted by remember {
+                            mutableStateOf(
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.CAMERA
+                                ) == PackageManager.PERMISSION_GRANTED
+                            )
+                        }
+                        val cameraPermissionLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.RequestPermission()
+                        ) { isGranted ->
+                            cameraPermissionGranted = isGranted
+                        }
+
+                        if (!cameraPermissionGranted) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Camera permission required for camera background",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Button(
+                                    onClick = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) }
+                                ) {
+                                    Text("Grant")
+                                }
+                            }
+                        } else {
+                            val availableLenses = remember(context) { BgvSettings.getAvailableCameraLenses(context) }
+                            var currentLens by remember { mutableIntStateOf(BgvSettings.getCameraLens(context)) }
+
+                            if (availableLenses.isNotEmpty()) {
+                                CameraLensDropdown(
+                                    availableLenses = availableLenses,
+                                    currentLens = currentLens,
+                                    onLensSelected = { lens ->
+                                        currentLens = lens
+                                        BgvSettings.setCameraLens(context, lens)
+                                    }
+                                )
+                            } else {
+                                Text(
+                                    text = "No cameras detected on this device",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(top = 8.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1577,6 +1634,7 @@ private fun BgvDropdown(
     val options = listOf(
         BgvOption(BgvSettings.MODE_VIDEOS, "On — Play .mp4 background videos from bgv/"),
         BgvOption(BgvSettings.MODE_STATIC_PHOTO, "Static background photo from bgphoto/"),
+        BgvOption(BgvSettings.MODE_CAMERA, "Camera — Live camera background"),
         BgvOption(3, "Off — Default dark gradient background")
     )
     var expanded by remember { mutableStateOf(false) }
@@ -1625,6 +1683,79 @@ private fun BgvDropdown(
                     ),
                     onClick = {
                         onModeSelected(option.mode)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+private data class LensOption(val lens: Int, val name: String)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CameraLensDropdown(
+    availableLenses: List<Int>,
+    currentLens: Int,
+    onLensSelected: (Int) -> Unit
+) {
+    val options = availableLenses.map { lens ->
+        val name = when (lens) {
+            BgvSettings.LENS_BACK -> "Rear Camera"
+            BgvSettings.LENS_FRONT -> "Front Camera"
+            BgvSettings.LENS_EXTERNAL -> "External Camera"
+            else -> "Camera ($lens)"
+        }
+        LensOption(lens, name)
+    }
+
+    var expanded by remember { mutableStateOf(false) }
+    val selectedName = options.find { it.lens == currentLens }?.name ?: options.firstOrNull()?.name ?: "Select camera..."
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        OutlinedTextField(
+            value = selectedName,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Select Camera Lens", fontWeight = FontWeight.Bold) },
+            textStyle = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            ),
+            colors = settingsDropdownColors(),
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            options.forEach { option ->
+                val isSelected = option.lens == currentLens
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = option.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Medium,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                    },
+                    leadingIcon = if (isSelected) {
+                        { Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+                    } else null,
+                    modifier = Modifier.background(
+                        if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else Color.Transparent
+                    ),
+                    onClick = {
+                        onLensSelected(option.lens)
                         expanded = false
                     }
                 )

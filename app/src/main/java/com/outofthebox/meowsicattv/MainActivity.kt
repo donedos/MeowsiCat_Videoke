@@ -120,7 +120,7 @@ class MainActivity : ComponentActivity() {
      * access" is excluded — Android only allows granting that via Settings.)
      */
     private fun requestAllRuntimePermissions() {
-        val wanted = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        val wanted = mutableListOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             wanted += Manifest.permission.POST_NOTIFICATIONS
             wanted += Manifest.permission.READ_MEDIA_AUDIO

@@ -21,6 +21,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.outofthebox.meowsicattv.ui.components.BannerAd
 import com.outofthebox.meowsicattv.data.LibraryRepository
 import com.outofthebox.meowsicattv.data.SongItem
@@ -261,6 +265,8 @@ private fun WelcomeDialog(onDismiss: () -> Unit) {
     BackHandler(onBack = onDismiss)
 
     val focusRequester = remember { FocusRequester() }
+    val scrollState = rememberScrollState()
+
     LaunchedEffect(Unit) {
         delay(200L)
         try {
@@ -277,42 +283,55 @@ private fun WelcomeDialog(onDismiss: () -> Unit) {
     ) {
         Surface(
             modifier = Modifier
-                .width(480.dp)
-                .wrapContentHeight()
-                .padding(24.dp),
+                .widthIn(max = 500.dp)
+                .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.9f)
+                .padding(16.dp),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
             border = BorderStroke(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
             tonalElevation = 16.dp
         ) {
             Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.cat_01),
-                    contentDescription = null,
-                    modifier = Modifier.size(56.dp)
-                )
-                Text(
-                    text = "Welcome to MeowsiCatTV!",
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Black,
-                    textAlign = TextAlign.Center
-                )
-                Text(
-                    text = "To start singing, upload your karaoke files into app storage via Settings -> Content & Database Files -> Upload Files:\n\n" +
-                        "• idx/: Catalog databases (shubidx, shubblob, megmid)\n" +
-                        "• songs/: Karaoke files (.mid, .kar, .mp3)\n" +
-                        "• sound/: SoundFont files (.sf2)\n" +
-                        "• bgv/: Background videos (.mp4, .mkv)\n" +
-                        "• bgphoto/: Background photos (.jpg, .png, .webp)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Start
-                )
-                Spacer(Modifier.height(8.dp))
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(scrollState),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.cat_01),
+                        contentDescription = null,
+                        modifier = Modifier.size(56.dp)
+                    )
+                    Text(
+                        text = "Welcome to MeowsiCatTV!",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = "To start singing, upload your karaoke files into app storage via Settings -> Content & Database Files -> Upload Files:\n\n" +
+                            "• idx/: Catalog databases (shubidx, shubblob, megmid)\n" +
+                            "• songs/: Karaoke files (.mid, .kar, .mp3)\n" +
+                            "• sound/: SoundFont files (.sf2)\n" +
+                            "• bgv/: Background videos (.mp4, .mkv)\n" +
+                            "• bgphoto/: Background photos (.jpg, .png, .webp)",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Start
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
                 Button(
                     onClick = onDismiss,
                     modifier = Modifier

@@ -20,6 +20,9 @@ import androidx.tv.material3.CardDefaults
 import androidx.tv.material3.Border
 import androidx.tv.material3.Glow
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -77,6 +80,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 
@@ -378,4 +382,180 @@ fun SongSubtitleText(text: String) {
         maxLines = 1,
         overflow = TextOverflow.Ellipsis
     )
+}
+
+@Composable
+fun KeypadButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    backgroundColor: Color = MaterialTheme.colorScheme.surfaceVariant,
+    focusedColor: Color = MaterialTheme.colorScheme.primary,
+    enabled: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val shape = RoundedCornerShape(10.dp)
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    val containerColor by animateColorAsState(
+        targetValue = if (isFocused) focusedColor else backgroundColor,
+        label = "keypadContainer"
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (isFocused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        label = "keypadContentColor"
+    )
+    val focusScale by animateFloatAsState(
+        targetValue = if (isFocused) 1.08f else 1f,
+        label = "keypadScale"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (isFocused) Color.White else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+        label = "keypadBorder"
+    )
+    val borderWidth by animateDpAsState(
+        targetValue = if (isFocused) 3.dp else 1.dp,
+        label = "keypadBorderWidth"
+    )
+
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier
+            .graphicsLayer(scaleX = focusScale, scaleY = focusScale)
+            .then(
+                if (isFocused) {
+                    Modifier.shadow(14.dp, shape, spotColor = focusedColor)
+                } else {
+                    Modifier
+                }
+            ),
+        shape = shape,
+        color = containerColor,
+        contentColor = contentColor,
+        border = BorderStroke(borderWidth, borderColor),
+        tonalElevation = if (isFocused) 8.dp else 4.dp,
+        interactionSource = interactionSource
+    ) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+fun CustomQwertyKeyboard(
+    onCharPress: (Char) -> Unit,
+    onBackspace: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier,
+    keyHeight: Dp = 34.dp
+) {
+    val primary = MaterialTheme.colorScheme.primary
+    val surface = MaterialTheme.colorScheme.surface
+    val secondaryContainer = MaterialTheme.colorScheme.secondaryContainer
+    val error = MaterialTheme.colorScheme.error
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        // Row 1: Numbers 1 2 3 4 5 6 7 8 9 0
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            listOf('1', '2', '3', '4', '5', '6', '7', '8', '9', '0').forEach { num ->
+                KeypadButton(
+                    onClick = { onCharPress(num) },
+                    modifier = Modifier.weight(1f).height(keyHeight),
+                    backgroundColor = surface,
+                    focusedColor = primary
+                ) {
+                    Text(num.toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        // Row 2: Q W E R T Y U I O P
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            listOf('Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P').forEach { char ->
+                KeypadButton(
+                    onClick = { onCharPress(char) },
+                    modifier = Modifier.weight(1f).height(keyHeight),
+                    backgroundColor = surface,
+                    focusedColor = primary
+                ) {
+                    Text(char.toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        // Row 3: A S D F G H J K L
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            listOf('A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L').forEach { char ->
+                KeypadButton(
+                    onClick = { onCharPress(char) },
+                    modifier = Modifier.weight(1f).height(keyHeight),
+                    backgroundColor = surface,
+                    focusedColor = primary
+                ) {
+                    Text(char.toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        // Row 4: Z X C V B N M + Backspace
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            listOf('Z', 'X', 'C', 'V', 'B', 'N', 'M').forEach { char ->
+                KeypadButton(
+                    onClick = { onCharPress(char) },
+                    modifier = Modifier.weight(1f).height(keyHeight),
+                    backgroundColor = surface,
+                    focusedColor = primary
+                ) {
+                    Text(char.toString(), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+            }
+            KeypadButton(
+                onClick = onBackspace,
+                modifier = Modifier.weight(1.5f).height(keyHeight),
+                backgroundColor = error.copy(alpha = 0.85f),
+                focusedColor = error
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "Backspace", tint = Color.White, modifier = Modifier.size(16.dp))
+            }
+        }
+        // Row 5: Space & Clear
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            KeypadButton(
+                onClick = { onCharPress(' ') },
+                modifier = Modifier.weight(3f).height(keyHeight),
+                backgroundColor = secondaryContainer,
+                focusedColor = primary
+            ) {
+                Text("SPACE", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            }
+            KeypadButton(
+                onClick = onClear,
+                modifier = Modifier.weight(1.5f).height(keyHeight),
+                backgroundColor = error.copy(alpha = 0.75f),
+                focusedColor = error
+            ) {
+                Text("CLR", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        }
+    }
 }

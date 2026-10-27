@@ -13,8 +13,8 @@ android {
         applicationId = "com.outofthebox.meowsicattv"
         minSdk = 26
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.5.7"
+        versionCode = 6
+        versionName = "1.6.5"
         multiDexEnabled = true
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -62,6 +62,10 @@ dependencies {
     implementation(libs.core)
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
